@@ -1,0 +1,121 @@
+:root {
+  --known: #e6f7ff;
+  --unknown: #fff2f0;
+  --accent: #2b9ca7;
+  --muted: #657078;
+  --bg: #fbfdfe;
+}
+body {
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    "PingFang SC",
+    sans-serif;
+  margin: 18px;
+  color: #0f2b33;
+  background: var(--bg);
+}
+header h1 {
+  margin: 0;
+}
+#uploader {
+  margin: 10px 0;
+}
+.hidden {
+  display: none;
+}
+#audio {
+  width: 100%;
+  margin: 10px 0;
+}
+#transcriptContainer {
+  border: 1px solid #e6eef0;
+  padding: 16px;
+  border-radius: 10px;
+  max-height: 480px;
+  overflow: auto;
+  background: #ffffff;
+}
+.sentence {
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.sentence.active {
+  background: linear-gradient(90deg, #f3fbfd, #ffffff);
+  box-shadow: 0 6px 18px rgba(43, 156, 167, 0.06);
+}
+.word {
+  cursor: default;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+.word.known {
+  background: linear-gradient(90deg, var(--known), #dff6ff);
+  color: #05534a;
+}
+.word.unknown {
+  background: linear-gradient(90deg, #fff3f2, var(--unknown));
+  color: #7a1c1c;
+}
+.hoverCard {
+  position: fixed;
+  z-index: 50;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #dce3e1;
+  background: white;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  display: none;
+}
+#vocabPanel {
+  margin-top: 18px;
+}
+#vocabList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vocabChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #eef6f7;
+  border-radius: 999px;
+  background: #ffffff;
+}
+.vocabChip.selected {
+  box-shadow: 0 6px 18px rgba(43, 156, 167, 0.06);
+  border-color: var(--accent);
+}
+.vocabChip.known {
+  opacity: 0.75;
+}
+button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #cfe8eb;
+  background: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Reading pane styles */
+#readingPreview {
+  font-size: 16px;
+  line-height: 1.68;
+  color: #0f2b33;
+}
+
+#readingInput {
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}

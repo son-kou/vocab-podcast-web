@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Vocab Podcast Web</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Vocab Podcast Web</h1>
+      <p>
+        Upload audio + transcript, sync, and study with integrated vocab/Anki
+        export.
+      </p>
+    </header>
+    <nav class="tabs" style="margin: 12px 0">
+      <button id="tabPodcast" class="tab active">Podcast</button>
+      <button id="tabReading" class="tab">Reading</button>
+    </nav>
+    <main>
+      <!-- uploader is hidden in UI; corpus is synced via the CLI. -->
+      <section id="uploader" class="hidden">
+        <div
+          style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"
+        >
+          <label
+            >Episode:
+            <select id="episodeSelect"></select
+          ></label>
+          <button id="loadEpisode">Load episode</button>
+          <label
+            >Audio file: <input type="file" id="audioInput" accept="audio/*"
+          /></label>
+          <label
+            >Transcript (WebVTT or plain text):
+            <input type="file" id="transcriptInput" accept="text/*"
+          /></label>
+          <button id="loadSample">Load sample</button>
+        </div>
+      </section>
+
+      <section id="player" class="hidden">
+        <audio id="audio" controls crossorigin="anonymous"></audio>
+        <div id="controls">
+          <label
+            >Speed:
+            <select id="speed">
+              <option>0.75</option>
+              <option selected>1</option>
+              <option>1.25</option>
+              <option>1.5</option>
+              <option>2</option>
+            </select></label
+          >
+          <div
+            id="ttsControls"
+            style="
+              display: inline-flex;
+              gap: 8px;
+              align-items: center;
+              margin-left: 12px;
+            "
+          >
+            <label
+              >Use TTS: <input type="checkbox" id="useTTS" checked
+            /></label>
+            <button id="ttsSpeak">Speak current sentence</button>
+            <label>Auto TTS: <input type="checkbox" id="ttsAuto" /></label>
+          </div>
+        </div>
+        <div id="transcriptContainer"></div>
+      </section>
+
+      <section id="vocabPanel">
+        <h2>Vocab</h2>
+        <div id="vocabStats">No vocab loaded.</div>
+        <div id="vocabList"></div>
+        <div
+          style="margin-top: 8px; display: flex; gap: 8px; align-items: center"
+        >
+          <button id="exportAnki">Export selected to Anki TSV</button>
+          <button id="exportSelectedFull">
+            Export selection for full Anki (lemmas)
+          </button>
+          <button id="showFlagged">Review flagged entries</button>
+        </div>
+        <div
+          id="flaggedPanel"
+          class="hidden"
+          style="
+            margin-top: 10px;
+            border: 1px solid #eee;
+            padding: 8px;
+            border-radius: 6px;
+            max-height: 260px;
+            overflow: auto;
+          "
+        ></div>
+      </section>
+
+      <!-- Reading tab: paste articles here. No upload required. -->
+      <section id="readingSection" class="hidden">
+        <h2>Reading</h2>
+        <div style="display: flex; gap: 12px; align-items: flex-start">
+          <textarea
+            id="readingInput"
+            placeholder="Paste article text here..."
+            rows="12"
+            style="
+              width: 48%;
+              padding: 10px;
+              border: 1px solid #ddd;
+              border-radius: 8px;
+              font-size: 14px;
+            "
+          ></textarea>
+          <div style="width: 52%">
+            <div
+              id="readingPreview"
+              style="
+                border: 1px solid #eee;
+                padding: 12px;
+                border-radius: 8px;
+                max-height: 420px;
+                overflow: auto;
+                background: #fff;
+              "
+            ></div>
+            <div
+              style="
+                margin-top: 8px;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+              "
+            >
+              <button id="saveArticle">Save article</button>
+              <button id="clearArticle">Clear</button>
+            </div>
+            <div id="savedArticles" style="margin-top: 12px"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <template id="sentenceTemplate"
+      ><div class="sentence" data-start="" data-end="">
+        <span class="text"></span></div
+    ></template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

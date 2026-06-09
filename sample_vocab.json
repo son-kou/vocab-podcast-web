@@ -1,0 +1,20 @@
+[
+    {
+        "lemma": "hej",
+        "zh": "嗨/你好",
+        "en": "hi",
+        "rank": 100
+    },
+    {
+        "lemma": "navn",
+        "zh": "名字",
+        "en": "name",
+        "rank": 500
+    },
+    {
+        "lemma": "jeg",
+        "zh": "我",
+        "en": "I",
+        "rank": 1
+    }
+]
