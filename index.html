@@ -99,46 +99,42 @@
         ></div>
       </section>
 
-      <!-- Reading tab: paste articles here. No upload required. -->
+      <!-- Reading tab -->
       <section id="readingSection" class="hidden">
-        <h2>Reading</h2>
-        <div style="display: flex; gap: 12px; align-items: flex-start">
-          <textarea
-            id="readingInput"
-            placeholder="Paste article text here..."
-            rows="12"
-            style="
-              width: 48%;
-              padding: 10px;
-              border: 1px solid #ddd;
-              border-radius: 8px;
-              font-size: 14px;
-            "
-          ></textarea>
-          <div style="width: 52%">
-            <div
-              id="readingPreview"
-              style="
-                border: 1px solid #eee;
-                padding: 12px;
-                border-radius: 8px;
-                max-height: 420px;
-                overflow: auto;
-                background: #fff;
-              "
-            ></div>
-            <div
-              style="
-                margin-top: 8px;
-                display: flex;
-                gap: 8px;
-                align-items: center;
-              "
-            >
-              <button id="saveArticle" class="auth-required">Save article</button>
-              <button id="clearArticle">Clear</button>
+        <div class="reading-layout">
+          <!-- Left sidebar: article tree -->
+          <aside id="articleTree">
+            <div class="tree-header">
+              <span>文章</span>
+              <button id="newArticleBtn" class="auth-required tree-new-btn" title="新建文章">＋</button>
             </div>
-            <div id="savedArticles" style="margin-top: 12px"></div>
+            <div id="articleList"></div>
+          </aside>
+          <!-- Right: composer / viewer -->
+          <div class="reading-main">
+            <!-- Placeholder when nothing is open -->
+            <div id="readingPlaceholder" class="reading-placeholder">
+              <p>从左侧选择文章，或点击 ＋ 新建</p>
+            </div>
+            <!-- Composer: new article form -->
+            <div id="articleComposer" class="hidden">
+              <input id="articleTitleInput" class="article-title-input" placeholder="文章标题（可选）" />
+              <textarea
+                id="readingInput"
+                placeholder="粘贴文章内容…"
+                rows="16"
+              ></textarea>
+              <div class="composer-actions">
+                <button id="saveArticle" class="auth-required">保存文章</button>
+                <button id="clearArticle">清空</button>
+                <button id="cancelCompose">取消</button>
+              </div>
+            </div>
+            <!-- Viewer: renders saved article -->
+            <div id="readingViewer" class="hidden">
+              <h3 id="readingTitle" class="reading-article-title"></h3>
+              <div id="readingPreview"></div>
+            </div>
           </div>
         </div>
       </section>

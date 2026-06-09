@@ -38,6 +38,10 @@ let selectedSet = new Set();
 let flaggedReviewedSet = new Set();
 let contentWordKeys = new Set(); // surface keys that appear in the current transcript/article
 
+const STORAGE_KEY_ARTICLES = "vocab_articles_v1";
+let articles = [];           // [{id, title, text, savedAt}]
+let currentArticleId = null; // id of the currently viewed article
+
 let currentHoveredSurface = null;
 const wiktionaryCache = new Map();
 
@@ -366,13 +370,13 @@ function onWordClick(ev) {
   const surface = (ev.target.dataset.surface || ev.target.textContent || "").toLowerCase();
   const key = vocabSurfaceToKey[surface] || surface;
   toggleMastery(key);
-  const info = vocabIndex[key] || null;
-  applyMasteryClass(ev.target, key, info);
-  // Update all other spans for the same key
+  // Resolve the lemma so we can update ALL inflected forms (er/var/været → være)
+  const lemmaKey = vocabIndex[key]?.lemma?.toLowerCase() || key;
   document.querySelectorAll(".word").forEach((el) => {
     const s = (el.dataset.surface || "").toLowerCase();
     const k = vocabSurfaceToKey[s] || s;
-    if (k === key) applyMasteryClass(el, key, info);
+    const elLemma = vocabIndex[k]?.lemma?.toLowerCase() || k;
+    if (elLemma === lemmaKey) applyMasteryClass(el, k, vocabIndex[k] || null);
   });
   renderVocabList();
 }
@@ -893,9 +897,27 @@ if (loadEpisodeBtn) {
 
 loadEpisodes();
 
-// ── Reading tab ───────────────────────────────────────────────────────────────
+// ── Reading tab — article storage ────────────────────────────────────────────
 
-let readingRenderDebounce = null;
+function loadArticlesFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ARTICLES);
+    articles = raw ? JSON.parse(raw) : [];
+  } catch (e) { articles = []; }
+}
+
+function saveArticlesToStorage() {
+  try { localStorage.setItem(STORAGE_KEY_ARTICLES, JSON.stringify(articles)); }
+  catch (e) { console.warn("save articles failed", e); }
+}
+
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function getArticleTitle(a) {
+  return a.title || a.text.trimStart().split(/\n/)[0].slice(0, 40) || "无标题";
+}
 
 function renderReadingFromText(text) {
   if (!readingPreview) return;
@@ -920,28 +942,113 @@ function renderReadingFromText(text) {
   });
 }
 
-if (readingInput) {
-  readingInput.addEventListener("input", (e) => {
-    if (readingRenderDebounce) clearTimeout(readingRenderDebounce);
-    readingRenderDebounce = setTimeout(() => renderReadingFromText(e.target.value), 250);
+function openArticle(article) {
+  currentArticleId = article.id;
+  document.getElementById("articleComposer")?.classList.add("hidden");
+  document.getElementById("readingPlaceholder")?.classList.add("hidden");
+  const viewer = document.getElementById("readingViewer");
+  viewer?.classList.remove("hidden");
+  const titleEl = document.getElementById("readingTitle");
+  if (titleEl) titleEl.textContent = getArticleTitle(article);
+  renderReadingFromText(article.text);
+  renderVocabList();
+  renderArticleTree();
+}
+
+function renderArticleTree() {
+  const list = document.getElementById("articleList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (articles.length === 0) {
+    list.innerHTML = '<div style="color:#aaa;font-size:12px;padding:6px 0">暂无文章</div>';
+    updateAuthUI();
+    return;
+  }
+  articles.forEach((a) => {
+    const item = document.createElement("div");
+    item.className = "article-item" + (a.id === currentArticleId ? " active" : "");
+
+    const title = document.createElement("span");
+    title.className = "article-item-title";
+    title.textContent = getArticleTitle(a);
+    title.title = getArticleTitle(a);
+    title.addEventListener("click", () => openArticle(a));
+
+    const del = document.createElement("button");
+    del.className = "article-del-btn auth-required";
+    del.textContent = "✕";
+    del.title = "删除";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!isLoggedIn()) { alert("请先登录"); return; }
+      if (!confirm(`删除"${getArticleTitle(a)}"？`)) return;
+      articles = articles.filter(x => x.id !== a.id);
+      saveArticlesToStorage();
+      if (currentArticleId === a.id) {
+        currentArticleId = null;
+        document.getElementById("readingViewer")?.classList.add("hidden");
+        document.getElementById("readingPlaceholder")?.classList.remove("hidden");
+        if (readingPreview) readingPreview.innerHTML = "";
+        contentWordKeys.clear();
+        renderVocabList();
+      }
+      renderArticleTree();
+    });
+
+    item.appendChild(title);
+    item.appendChild(del);
+    list.appendChild(item);
+  });
+  updateAuthUI();
+}
+
+// New article button
+const newArticleBtn = document.getElementById("newArticleBtn");
+if (newArticleBtn) {
+  newArticleBtn.addEventListener("click", () => {
+    if (!isLoggedIn()) { alert("请先登录"); return; }
+    const composer = document.getElementById("articleComposer");
+    composer?.classList.remove("hidden");
+    document.getElementById("readingViewer")?.classList.add("hidden");
+    document.getElementById("readingPlaceholder")?.classList.add("hidden");
+    const titleInput = document.getElementById("articleTitleInput");
+    if (titleInput) titleInput.value = "";
+    if (readingInput) { readingInput.value = ""; readingInput.focus(); }
+  });
+}
+
+// Cancel compose
+const cancelComposeBtn = document.getElementById("cancelCompose");
+if (cancelComposeBtn) {
+  cancelComposeBtn.addEventListener("click", () => {
+    document.getElementById("articleComposer")?.classList.add("hidden");
+    if (currentArticleId) {
+      const a = articles.find(x => x.id === currentArticleId);
+      if (a) { openArticle(a); return; }
+    }
+    document.getElementById("readingPlaceholder")?.classList.remove("hidden");
+  });
+}
+
+// Save article — now stores to localStorage
+if (saveArticleBtn) {
+  saveArticleBtn.addEventListener("click", () => {
+    if (!isLoggedIn()) { alert("请先登录"); return; }
+    const text = readingInput?.value || "";
+    if (!text.trim()) { alert("请输入文章内容"); return; }
+    const titleInput = document.getElementById("articleTitleInput");
+    const title = titleInput?.value?.trim() || "";
+    const article = { id: genId(), title, text, savedAt: Date.now() };
+    articles.unshift(article);
+    saveArticlesToStorage();
+    document.getElementById("articleComposer")?.classList.add("hidden");
+    openArticle(article);
   });
 }
 
 if (clearArticleBtn) {
   clearArticleBtn.addEventListener("click", () => {
     if (readingInput) readingInput.value = "";
-    if (readingPreview) readingPreview.innerHTML = "";
-  });
-}
-
-if (saveArticleBtn) {
-  saveArticleBtn.addEventListener("click", () => {
-    const text = (readingInput && readingInput.value) || "";
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `article-${Date.now()}.txt`;
-    a.click();
   });
 }
 
@@ -955,14 +1062,30 @@ function showTab(name) {
     tabReading && tabReading.classList.add("active");
     tabPodcast && tabPodcast.classList.remove("active");
     if (player) player.classList.add("hidden");
-    if (vocab) vocab.classList.add("hidden");
+    if (vocab) vocab.classList.remove("hidden");
     if (reading) reading.classList.remove("hidden");
+    // Re-populate contentWordKeys from current article
+    if (currentArticleId) {
+      const a = articles.find(x => x.id === currentArticleId);
+      if (a) renderReadingFromText(a.text);
+    } else {
+      contentWordKeys.clear();
+    }
+    renderVocabList();
   } else {
     tabPodcast && tabPodcast.classList.add("active");
     tabReading && tabReading.classList.remove("active");
     if (player) player.classList.remove("hidden");
     if (vocab) vocab.classList.remove("hidden");
     if (reading) reading.classList.add("hidden");
+    // Re-populate contentWordKeys from existing transcript spans (no re-render needed)
+    contentWordKeys.clear();
+    document.querySelectorAll("#transcriptContainer .word").forEach((el) => {
+      const s = (el.dataset.surface || "").toLowerCase();
+      const k = vocabSurfaceToKey[s] || s;
+      if (vocabIndex[k]) contentWordKeys.add(k);
+    });
+    renderVocabList();
   }
 }
 
@@ -975,6 +1098,10 @@ showTab("podcast");
 const loginBtn = document.getElementById("loginBtn");
 if (loginBtn) loginBtn.addEventListener("click", handleLoginBtn);
 updateAuthUI();
+
+// ── Article init ──────────────────────────────────────────────────────────────
+loadArticlesFromStorage();
+renderArticleTree();
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
 window._vocabIndex = vocabIndex;
