@@ -1,9 +1,15 @@
 :root {
-  --known: #e6f7ff;
-  --unknown: #fff2f0;
   --accent: #2b9ca7;
   --muted: #657078;
   --bg: #fbfdfe;
+  /* mastery level tints (teal family, increasing intensity) */
+  --m1: rgba(43, 156, 167, 0.10);
+  --m2: rgba(43, 156, 167, 0.22);
+  --m3: rgba(43, 156, 167, 0.38);
+  --m4: rgba(43, 156, 167, 0.58);
+  --m5: rgba(43, 156, 167, 0.78);
+  /* important-unlearned tint (warm amber) */
+  --rank-hi: rgba(255, 155, 40, 0.14);
 }
 body {
   font-family:
@@ -43,6 +49,7 @@ header h1 {
   padding: 8px 10px;
   border-radius: 8px;
   margin: 8px 0;
+  line-height: 1.8;
 }
 .sentence.active {
   background: linear-gradient(90deg, #f3fbfd, #ffffff);
@@ -50,30 +57,173 @@ header h1 {
 }
 .word {
   cursor: default;
-  padding: 3px 6px;
-  border-radius: 6px;
+  padding: 2px 5px;
+  border-radius: 5px;
   transition:
     background 120ms ease,
-    color 120ms ease;
+    color 120ms ease,
+    box-shadow 120ms ease;
 }
-.word.known {
-  background: linear-gradient(90deg, var(--known), #dff6ff);
-  color: #05534a;
-}
-.word.unknown {
-  background: linear-gradient(90deg, #fff3f2, var(--unknown));
-  color: #7a1c1c;
-}
+
+/* ── Mastery levels (teal family, same hue — increasing depth) ── */
+.word.mastery-1 { background: var(--m1); }
+.word.mastery-2 { background: var(--m2); }
+.word.mastery-3 { background: var(--m3); }
+.word.mastery-4 { background: var(--m4); color: #083a3f; }
+.word.mastery-5 { background: var(--m5); color: #052829; opacity: 0.88; }
+
+/* High-frequency word not yet in Anki: warm amber nudge */
+.word.rank-hi { background: var(--rank-hi); }
+
+/* Legacy binary mastery — kept for backward compat with localStorage data */
+.word.known { background: var(--m4); color: #083a3f; }
+.word.unknown { background: rgba(220, 60, 40, 0.08); color: #7a1c1c; }
+
+/* Hover: darken the mastery tint slightly */
+.word:hover { box-shadow: 0 0 0 1.5px var(--accent); cursor: pointer; }
+
+/* ── Hover card ── */
 .hoverCard {
   position: fixed;
-  z-index: 50;
-  padding: 8px;
-  border-radius: 8px;
-  border: 1px solid #dce3e1;
-  background: white;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  width: 320px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #d4e8eb;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.11);
   display: none;
+  font-size: 13px;
+  line-height: 1.5;
+  pointer-events: none;
 }
+.hoverCard .hc-lemma {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f2b33;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.hoverCard .hc-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.hoverCard .hc-ipa {
+  font-size: 12px;
+  color: #5f7a80;
+  letter-spacing: 0.02em;
+  margin-top: 1px;
+}
+.hoverCard .hc-gloss-zh {
+  margin-top: 5px;
+  color: #0f2b33;
+  font-weight: 500;
+}
+.hoverCard .hc-gloss-en {
+  color: var(--muted);
+  font-size: 12px;
+}
+.hoverCard .hc-divider {
+  border: none;
+  border-top: 1px solid #eaf2f3;
+  margin: 8px 0;
+}
+.hoverCard .hc-example {
+  font-size: 12px;
+  color: #1a3d45;
+  font-style: italic;
+}
+.hoverCard .hc-example-zh {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.hoverCard .hc-mnemonic {
+  font-size: 12px;
+  color: #5b4900;
+  background: rgba(255, 200, 40, 0.09);
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-top: 5px;
+}
+.hoverCard .hc-warning {
+  font-size: 12px;
+  color: #7a1c1c;
+  background: rgba(200, 30, 30, 0.05);
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-top: 4px;
+}
+.hoverCard .hc-confusing {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.hoverCard .hc-links {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+.hoverCard .hc-link {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #c8e0e3;
+  background: #f4fbfc;
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 80ms;
+}
+.hoverCard .hc-link:hover { background: #e0f5f7; }
+
+/* ── Wiktionary cross-reference section ── */
+.hoverCard .hc-wikt-section { margin-top: 2px; }
+.hoverCard .hc-wikt-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+}
+.hoverCard .hc-wikt-pos {
+  display: inline-block;
+  font-size: 10px;
+  color: #888;
+  background: #f5f5f5;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 4px;
+}
+.hoverCard .hc-wikt-def {
+  font-size: 12px;
+  color: #4a6570;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.hoverCard .hc-wikt-loading,
+.hoverCard .hc-wikt-empty {
+  font-size: 11px;
+  color: #bbb;
+}
+
+/* mastery badge inside hover card */
+.hoverCard .hc-mastery {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--m3);
+  color: #083a3f;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
 #vocabPanel {
   margin-top: 18px;
 }
@@ -90,13 +240,14 @@ header h1 {
   border: 1px solid #eef6f7;
   border-radius: 999px;
   background: #ffffff;
+  cursor: pointer;
 }
 .vocabChip.selected {
   box-shadow: 0 6px 18px rgba(43, 156, 167, 0.06);
   border-color: var(--accent);
 }
-.vocabChip.known {
-  opacity: 0.75;
+.vocabChip.known, .vocabChip.mastery-4, .vocabChip.mastery-5 {
+  opacity: 0.72;
 }
 button {
   padding: 8px 12px;
@@ -107,13 +258,20 @@ button {
   cursor: pointer;
 }
 
-/* Reading pane styles */
-#readingPreview {
-  font-size: 16px;
-  line-height: 1.68;
-  color: #0f2b33;
+/* Tab nav */
+.tab { font-weight: 500; }
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
+/* Reading pane */
+#readingPreview {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #0f2b33;
+}
 #readingInput {
   font-family: inherit;
   font-size: 14px;

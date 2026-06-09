@@ -1,4 +1,4 @@
-/* Minimal client-side prototype for transcript-sync + vocab hover + Anki export */
+/* Vocab Podcast Web — transcript sync + vocab hover + mastery levels + Anki export */
 
 const audioInput = document.getElementById("audioInput");
 const transcriptInput = document.getElementById("transcriptInput");
@@ -17,28 +17,30 @@ const ttsSpeakBtn = document.getElementById("ttsSpeak");
 const useTTSCheckbox = document.getElementById("useTTS");
 const ttsAutoCheckbox = document.getElementById("ttsAuto");
 let ttsAutoPlaying = false;
-// Tabs & Reading UI elements
+
 const tabPodcast = document.getElementById("tabPodcast");
 const tabReading = document.getElementById("tabReading");
 const readingInput = document.getElementById("readingInput");
 const readingPreview = document.getElementById("readingPreview");
 const saveArticleBtn = document.getElementById("saveArticle");
 const clearArticleBtn = document.getElementById("clearArticle");
-const savedArticlesEl = document.getElementById("savedArticles");
 
-// local saved articles key
-const STORAGE_KEY_SAVED_ARTICLES = "vocab_podcast_saved_articles_v1";
+const STORAGE_KEY_MASTERY = "vocab_podcast_mastery_v2";
+const STORAGE_KEY_FLAGGED_REVIEWED = "vocab_podcast_flagged_reviewed_v1";
 
 let sentences = [];
-let vocabIndex = {}; // lemma -> {lemma, zh, en, rank, known:false}
-let vocabSurfaceToKey = {}; // normalized surface form or lemma -> key in vocabIndex
-let userMastery = {}; // lemma -> known boolean
+let vocabIndex = {};        // surface form -> {lemma, zh, en, rank, pos}
+let vocabSurfaceToKey = {}; // normalized surface -> key in vocabIndex
+let vocabDetail = {};       // lemma.toLowerCase() -> {ipa, example_da, example_zh, mnemonic, warning, confusing}
+let userMastery = {};       // lemma -> {level:1-5, interval:N, reps:N}  OR  true/false (legacy)
 let flaggedEntries = [];
 let selectedSet = new Set();
-
-const STORAGE_KEY_MASTERY = "vocab_podcast_mastery_v1";
-const STORAGE_KEY_FLAGGED_REVIEWED = "vocab_podcast_flagged_reviewed_v1";
 let flaggedReviewedSet = new Set();
+
+let currentHoveredSurface = null;
+const wiktionaryCache = new Map();
+
+// ── Persistence ──────────────────────────────────────────────────────────────
 
 function loadPersistence() {
   try {
@@ -49,13 +51,10 @@ function loadPersistence() {
   }
   try {
     const raw2 = localStorage.getItem(STORAGE_KEY_FLAGGED_REVIEWED);
-    if (raw2) {
-      JSON.parse(raw2).forEach((k) => flaggedReviewedSet.add(k));
-    }
-  } catch (e) {
-    console.warn("failed to load flagged reviewed", e);
-  }
+    if (raw2) JSON.parse(raw2).forEach((k) => flaggedReviewedSet.add(k));
+  } catch (e) {}
 }
+
 function savePersistence() {
   try {
     localStorage.setItem(STORAGE_KEY_MASTERY, JSON.stringify(userMastery));
@@ -72,6 +71,53 @@ function savePersistence() {
 
 loadPersistence();
 
+// ── Mastery helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Returns a mastery level 0-5 for a vocab key.
+ * 0 = not tracked / not in Anki
+ * 1-5 = Anki levels (see sync_with_anki.py)
+ */
+function getMasteryLevel(key) {
+  const m = userMastery[key];
+  if (m === undefined || m === null) return 0;
+  if (typeof m === "boolean") return m ? 4 : 0;    // legacy format
+  if (typeof m === "object") return m.level || 0;
+  return 0;
+}
+
+function getMasteryLabel(level) {
+  return ["未学", "新词", "学习中", "复习中", "已掌握", "精通"][level] || "";
+}
+
+/** Toggle mastery: 0 → 4 (known) or 4+ → 0 (remove) */
+function toggleMastery(key) {
+  const cur = getMasteryLevel(key);
+  if (cur >= 4) {
+    delete userMastery[key];
+  } else {
+    userMastery[key] = { level: 4, interval: 0, reps: 0 };
+  }
+  savePersistence();
+}
+
+// ── Word span creation ────────────────────────────────────────────────────────
+
+const RANK_HI_THRESHOLD = 800;
+
+function applyMasteryClass(el, key, info) {
+  // Remove all mastery/rank classes first
+  el.classList.remove("known", "unknown", "rank-hi",
+    "mastery-1", "mastery-2", "mastery-3", "mastery-4", "mastery-5");
+  const level = getMasteryLevel(key);
+  if (level >= 1) {
+    el.classList.add(`mastery-${level}`);
+  } else if (info && info.rank && info.rank <= RANK_HI_THRESHOLD) {
+    // Important word not yet in Anki → warm amber hint
+    el.classList.add("rank-hi");
+  }
+}
+
 function makeWordSpan(word) {
   const span = document.createElement("span");
   span.className = "word";
@@ -80,80 +126,215 @@ function makeWordSpan(word) {
   span.addEventListener("mouseleave", onWordLeave);
   span.addEventListener("click", onWordClick);
   span.dataset.surface = word;
-  // reflect persisted mastery state if present
-  try {
-    const key = vocabSurfaceToKey[word] || word;
-    const st = userMastery[key];
-    if (st === true) span.classList.add("known");
-    else if (st === false) span.classList.add("unknown");
-  } catch (e) {}
+  const key = vocabSurfaceToKey[word] || word;
+  const info = vocabIndex[key] || null;
+  applyMasteryClass(span, key, info);
   return span;
 }
 
-function onWordHover(ev) {
-  const text = (
-    ev.target.dataset.surface ||
-    ev.target.textContent ||
-    ""
-  ).toLowerCase();
-  const rect = ev.target.getBoundingClientRect();
-  const card = document.getElementById("hoverCard") || createHoverCard();
-  const key = vocabSurfaceToKey[text];
-  const info = key ? vocabIndex[key] : null;
-  if (info) {
-    card.innerHTML = `<b>${info.lemma}</b><div>${info.zh || ""}</div><div style="color:#5f6b7a">${info.en || ""}</div>`;
-  } else {
-    card.innerHTML = `<b>${text}</b><div>未在词表中</div>`;
+// ── Hover card ────────────────────────────────────────────────────────────────
+
+let hoverCard = null;
+
+function getHoverCard() {
+  if (!hoverCard) {
+    hoverCard = document.createElement("div");
+    hoverCard.id = "hoverCard";
+    hoverCard.className = "hoverCard";
+    // Allow click on links inside the card
+    hoverCard.addEventListener("mouseenter", () => { hoverCard.style.display = "block"; });
+    hoverCard.addEventListener("mouseleave", () => { hoverCard.style.display = "none"; });
+    document.body.appendChild(hoverCard);
   }
-  card.style.left = rect.right + 6 + "px";
-  card.style.top = rect.top + "px";
+  return hoverCard;
+}
+
+function escHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function onWordHover(ev) {
+  const surface = (ev.target.dataset.surface || ev.target.textContent || "").toLowerCase();
+  currentHoveredSurface = surface;
+  const key = vocabSurfaceToKey[surface];
+  const info = key ? vocabIndex[key] : null;
+
+  const card = getHoverCard();
+  card.innerHTML = buildHoverHTML(surface, info, key);
+
+  // Position: right of word, clamped to viewport
+  const rect = ev.target.getBoundingClientRect();
+  const cardW = 320;
+  let left = rect.right + 8;
+  if (left + cardW > window.innerWidth - 8) left = rect.left - cardW - 8;
+  card.style.left = Math.max(4, left) + "px";
+  card.style.top = Math.min(rect.top, window.innerHeight - 200) + "px";
   card.style.display = "block";
+  card.style.pointerEvents = "auto";
+  updateWiktSection(card, (info?.lemma || surface).toLowerCase(), surface);
 }
-function createHoverCard() {
-  const card = document.createElement("div");
-  card.id = "hoverCard";
-  card.className = "hoverCard";
-  document.body.appendChild(card);
-  return card;
+
+function buildHoverHTML(surface, info, key) {
+  let html;
+  if (!info) {
+    html = `<div class="hc-lemma">${escHtml(surface)}</div>
+            <div class="hc-gloss-en" style="margin-top:4px">未在词表中</div>
+            <hr class="hc-divider">
+            ${externalLinks(surface)}`;
+  } else {
+    const lemma = info.lemma || surface;
+    const level = getMasteryLevel(key);
+    const detail = vocabDetail[lemma.toLowerCase()] || {};
+
+    html = `<div class="hc-lemma">${escHtml(lemma)}`;
+    html += `<span class="hc-meta">rank ${info.rank || "?"}${info.pos ? " · " + info.pos : ""}</span>`;
+    if (level > 0) {
+      html += `<span class="hc-mastery">${escHtml(getMasteryLabel(level))}</span>`;
+    }
+    html += `</div>`;
+
+    if (detail.ipa) {
+      html += `<div class="hc-ipa">/${escHtml(detail.ipa)}/</div>`;
+    }
+
+    if (info.zh) html += `<div class="hc-gloss-zh">${escHtml(info.zh)}</div>`;
+    if (info.en) html += `<div class="hc-gloss-en">${escHtml(info.en)}</div>`;
+
+    const hasExtra = detail.example_da || detail.mnemonic || detail.warning || (detail.confusing && detail.confusing.length);
+    if (hasExtra) {
+      html += `<hr class="hc-divider">`;
+    }
+
+    if (detail.example_da) {
+      html += `<div class="hc-example">${escHtml(detail.example_da)}</div>`;
+      if (detail.example_zh) {
+        html += `<div class="hc-example-zh">${escHtml(detail.example_zh)}</div>`;
+      }
+    }
+
+    if (detail.mnemonic) {
+      html += `<div class="hc-mnemonic">💡 ${escHtml(detail.mnemonic)}</div>`;
+    }
+
+    if (detail.warning) {
+      html += `<div class="hc-warning">⚠️ ${escHtml(detail.warning)}</div>`;
+    }
+
+    if (detail.confusing && detail.confusing.length) {
+      html += `<div class="hc-confusing">混淆词: ${detail.confusing.map(escHtml).join(", ")}</div>`;
+    }
+
+    html += `<hr class="hc-divider">`;
+    html += externalLinks(lemma);
+  }
+  // Wiktionary cross-reference section — populated asynchronously
+  html += `<hr class="hc-divider"><div class="hc-wikt-section"></div>`;
+  return html;
 }
-function onWordLeave() {
-  const card = document.getElementById("hoverCard");
-  if (card) card.style.display = "none";
+
+function externalLinks(word) {
+  const enc = encodeURIComponent(word);
+  return `<div class="hc-links">
+    <a class="hc-link" href="https://ordnet.dk/ddo/ordbog?query=${enc}" target="_blank" rel="noopener">DDO</a>
+    <a class="hc-link" href="https://en.wiktionary.org/wiki/${enc}#Danish" target="_blank" rel="noopener">Wiktionary</a>
+  </div>`;
 }
+
+// ── Wiktionary cross-reference ────────────────────────────────────────────────
+
+function stripHtml(s) {
+  const d = document.createElement("div");
+  d.innerHTML = s || "";
+  return d.textContent || "";
+}
+
+function buildWiktHTML(entries) {
+  if (!entries || entries.length === 0) {
+    return '<div class="hc-wikt-empty">Wiktionary: 未找到丹麦语条目</div>';
+  }
+  let html = '<div class="hc-wikt-label">Wiktionary 互查</div>';
+  for (const entry of entries.slice(0, 2)) {
+    const pos = entry.partOfSpeech || "";
+    if (pos) html += `<span class="hc-wikt-pos">${escHtml(pos)}</span> `;
+    for (const def of (entry.definitions || []).slice(0, 2)) {
+      const text = stripHtml(def.definition || "");
+      if (text) html += `<div class="hc-wikt-def">${escHtml(text)}</div>`;
+    }
+  }
+  return html;
+}
+
+async function updateWiktSection(card, lemma, surface) {
+  const el = card.querySelector(".hc-wikt-section");
+  if (!el) return;
+  if (wiktionaryCache.has(lemma)) {
+    el.innerHTML = buildWiktHTML(wiktionaryCache.get(lemma));
+    return;
+  }
+  el.innerHTML = '<div class="hc-wikt-loading">Wiktionary…</div>';
+  try {
+    const resp = await fetch(
+      `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(lemma)}`
+    );
+    const entries = resp.ok ? ((await resp.json()).da || []) : null;
+    wiktionaryCache.set(lemma, entries);
+    if (currentHoveredSurface === surface && card.style.display !== "none") {
+      el.innerHTML = buildWiktHTML(entries);
+    }
+  } catch (e) {
+    wiktionaryCache.set(lemma, null);
+    if (currentHoveredSurface === surface && card.style.display !== "none") {
+      el.innerHTML = '<div class="hc-wikt-empty">Wiktionary 查询失败</div>';
+    }
+  }
+}
+
+function onWordLeave(ev) {
+  // Delay hiding so user can move mouse into card to click links
+  setTimeout(() => {
+    if (hoverCard && !hoverCard.matches(":hover")) {
+      hoverCard.style.display = "none";
+    }
+  }, 120);
+}
+
 function onWordClick(ev) {
-  const text = (
-    ev.target.dataset.surface ||
-    ev.target.textContent ||
-    ""
-  ).toLowerCase();
-  const key = vocabSurfaceToKey[text] || text;
-  userMastery[key] = !userMastery[key];
-  ev.target.classList.toggle("known", !!userMastery[key]);
-  ev.target.classList.toggle("unknown", !userMastery[key]);
+  const surface = (ev.target.dataset.surface || ev.target.textContent || "").toLowerCase();
+  const key = vocabSurfaceToKey[surface] || surface;
+  toggleMastery(key);
+  const info = vocabIndex[key] || null;
+  applyMasteryClass(ev.target, key, info);
+  // Update all other spans for the same key
+  document.querySelectorAll(".word").forEach((el) => {
+    const s = (el.dataset.surface || "").toLowerCase();
+    const k = vocabSurfaceToKey[s] || s;
+    if (k === key) applyMasteryClass(el, key, info);
+  });
   renderVocabList();
-  savePersistence();
 }
+
+// ── Transcript rendering ──────────────────────────────────────────────────────
 
 function renderTranscript() {
   transcriptContainer.innerHTML = "";
-  sentences.forEach((s, i) => {
+  sentences.forEach((s) => {
     const node = sentenceTemplate.content.firstElementChild.cloneNode(true);
     node.dataset.start = s.start;
     node.dataset.end = s.end;
     const textSpan = node.querySelector(".text");
-    // split words and wrap spans
     const parts = s.text.replace(/\r?\n/g, " ").split(/(\s+)/);
     parts.forEach((p) => {
       if (/\s+/.test(p)) textSpan.appendChild(document.createTextNode(p));
       else {
-        const norm = p.replace(/[.,!?;:()"“”]/g, "").toLowerCase();
+        const norm = p.replace(/[.,!?;:()"""'«»–—]/g, "").toLowerCase();
         textSpan.appendChild(makeWordSpan(norm));
       }
     });
-    // click sentence: if TTS enabled or no audio, speak; else seek audio
     node.addEventListener("click", () => {
-      const useTTS = document.getElementById("useTTS");
-      const useTTSChecked = useTTS && useTTS.checked;
+      const useTTSChecked = useTTSCheckbox && useTTSCheckbox.checked;
       if (useTTSChecked || !audio.src) {
         speakText(s.text);
       } else {
@@ -164,6 +345,8 @@ function renderTranscript() {
     transcriptContainer.appendChild(node);
   });
 }
+
+// ── TTS ───────────────────────────────────────────────────────────────────────
 
 function speakText(text) {
   if (!("speechSynthesis" in window)) return Promise.resolve();
@@ -188,29 +371,23 @@ async function startTTSAuto(fromIndex = 0) {
   if (!("speechSynthesis" in window)) return;
   ttsAutoPlaying = true;
   for (let i = fromIndex; i < sentences.length && ttsAutoPlaying; i++) {
-    const s = sentences[i];
-    transcriptContainer
-      .querySelectorAll(".sentence")
-      .forEach((n) => n.classList.remove("active"));
+    transcriptContainer.querySelectorAll(".sentence").forEach((n) => n.classList.remove("active"));
     const node = transcriptContainer.querySelectorAll(".sentence")[i];
     if (node) {
       node.classList.add("active");
       node.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    await speakText(s.text);
+    await speakText(sentences[i].text);
     if (!ttsAutoPlaying) break;
     await new Promise((r) => setTimeout(r, 200));
   }
   ttsAutoPlaying = false;
-  const ttsAuto = document.getElementById("ttsAuto");
-  if (ttsAuto) ttsAuto.checked = false;
+  if (ttsAutoCheckbox) ttsAutoCheckbox.checked = false;
 }
 
 function stopTTSAuto() {
   ttsAutoPlaying = false;
-  try {
-    speechSynthesis.cancel();
-  } catch (e) {}
+  try { speechSynthesis.cancel(); } catch (e) {}
 }
 
 function speakCurrentSentence() {
@@ -218,11 +395,8 @@ function speakCurrentSentence() {
     transcriptContainer.querySelector(".sentence.active") ||
     transcriptContainer.querySelector(".sentence");
   if (!active) return;
-  const idx = Array.from(
-    transcriptContainer.querySelectorAll(".sentence"),
-  ).indexOf(active);
-  const s = sentences[idx];
-  if (s) speakText(s.text);
+  const idx = Array.from(transcriptContainer.querySelectorAll(".sentence")).indexOf(active);
+  if (sentences[idx]) speakText(sentences[idx].text);
 }
 
 if (ttsSpeakBtn) ttsSpeakBtn.addEventListener("click", speakCurrentSentence);
@@ -232,66 +406,32 @@ if (ttsAutoCheckbox)
     else stopTTSAuto();
   });
 
-function loadSampleData() {
-  // sample: two sentences with start/end
-  sentences = [
-    { start: 0.0, end: 4.0, text: "Hej, mit navn er Anna." },
-    {
-      start: 4.1,
-      end: 9.0,
-      text: "Jeg bor i København og jeg lærer dansk hver dag.",
-    },
-  ];
-  // load a tiny sample vocab index
-  vocabIndex = {
-    hej: { lemma: "hej", zh: "嗨/你好", en: "hi", rank: 100 },
-    navn: { lemma: "navn", zh: "名字", en: "name", rank: 500 },
-    jeg: { lemma: "jeg", zh: "我", en: "I", rank: 1 },
-    bor: { lemma: "bo", zh: "居住", en: "live", rank: 1200 },
-    københavn: {
-      lemma: "København",
-      zh: "哥本哈根",
-      en: "Copenhagen",
-      rank: 2000,
-    },
-    lærer: { lemma: "lære", zh: "学习/教", en: "learn/teach", rank: 800 },
-  };
-  userMastery = {};
-  document.getElementById("audio").src = "";
-  playerSection.classList.remove("hidden");
-  renderTranscript();
-  renderVocabList();
-}
+// ── Vocab panel ───────────────────────────────────────────────────────────────
 
 function renderVocabList() {
   vocabList.innerHTML = "";
-  // Deduplicate by lemma for display: prefer lowest rank entry per lemma
   const entries = Object.keys(vocabIndex).map((k) => {
     const v = vocabIndex[k] || {};
-    return {
-      key: k,
-      lemma: (v.lemma || k).toString(),
-      rank: v.rank || 1000000,
-    };
+    return { key: k, lemma: (v.lemma || k).toString(), rank: v.rank || 1000000 };
   });
   entries.sort((a, b) => a.rank - b.rank);
   const seen = new Set();
   const unique = [];
   entries.forEach((e) => {
     const lk = e.lemma.toLowerCase();
-    if (!seen.has(lk)) {
-      seen.add(lk);
-      unique.push(e);
-    }
+    if (!seen.has(lk)) { seen.add(lk); unique.push(e); }
   });
   unique.forEach((e) => {
     const l = e.key;
+    const v = vocabIndex[l];
     const chip = document.createElement("div");
     chip.className = "vocabChip";
-    if (userMastery[l]) chip.classList.add("known");
+    const level = getMasteryLevel(l);
+    if (level >= 4) chip.classList.add("mastery-4");
+    if (level === 5) chip.classList.add("mastery-5");
     if (selectedSet.has(l)) chip.classList.add("selected");
     const textSpan = document.createElement("span");
-    textSpan.textContent = `${vocabIndex[l].lemma} — ${vocabIndex[l].zh || ""}`;
+    textSpan.textContent = `${v.lemma} — ${v.zh || ""}`;
     textSpan.style.marginRight = "8px";
     const selBtn = document.createElement("button");
     selBtn.textContent = selectedSet.has(l) ? "Selected" : "Select";
@@ -304,33 +444,30 @@ function renderVocabList() {
     chip.appendChild(textSpan);
     chip.appendChild(selBtn);
     chip.addEventListener("click", () => {
-      userMastery[l] = !userMastery[l];
+      toggleMastery(l);
       renderVocabList();
-      savePersistence();
     });
     vocabList.appendChild(chip);
   });
-  vocabStats.textContent = `${unique.length} vocab loaded`;
+  const knownCount = unique.filter((e) => getMasteryLevel(e.key) >= 4).length;
+  vocabStats.textContent = `${unique.length} 词  ·  已掌握 ${knownCount}`;
 }
 
+// ── Anki export ───────────────────────────────────────────────────────────────
+
 function exportAnkiTSV() {
-  // very small TSV: Front (lemma), Back (zh + en), Tags (known/unknown)
   const rows = [];
-  const keys = selectedSet.size
-    ? Array.from(selectedSet)
-    : Object.keys(vocabIndex);
+  const keys = selectedSet.size ? Array.from(selectedSet) : Object.keys(vocabIndex);
   keys.forEach((k) => {
     const v = vocabIndex[k];
     if (!v) return;
-    const known = !!userMastery[k];
+    const level = getMasteryLevel(k);
     const front = v.lemma;
     const back = `${v.zh || ""} — ${v.en || ""}`;
-    const tags = known ? "known" : "unknown";
+    const tags = getMasteryLabel(level) || "未学";
     rows.push([front, back, tags].join("\t"));
   });
-  const blob = new Blob([rows.join("\n")], {
-    type: "text/tab-separated-values",
-  });
+  const blob = new Blob([rows.join("\n")], { type: "text/tab-separated-values" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -338,15 +475,14 @@ function exportAnkiTSV() {
   a.click();
 }
 
-loadSample.addEventListener("click", loadSampleData);
-exportAnki.addEventListener("click", exportAnkiTSV);
+if (loadSample) loadSample.addEventListener("click", loadSampleData);
+if (exportAnki) exportAnki.addEventListener("click", exportAnkiTSV);
+
 const exportSelectedFullBtn = document.getElementById("exportSelectedFull");
 if (exportSelectedFullBtn) {
   exportSelectedFullBtn.addEventListener("click", () => {
     if (selectedSet.size === 0) {
-      alert(
-        'No selected lemmas. Click "Select" on chips to choose words to export.',
-      );
+      alert('No selected lemmas. Click "Select" on chips to choose words to export.');
       return;
     }
     const list = Array.from(selectedSet).map((s) =>
@@ -361,52 +497,33 @@ if (exportSelectedFullBtn) {
   });
 }
 
+// ── Audio controls ────────────────────────────────────────────────────────────
+
 speed.addEventListener("change", () => {
   audio.playbackRate = parseFloat(speed.value);
 });
 
 audio.addEventListener("timeupdate", () => {
   const t = audio.currentTime;
-  // find active sentence
   let active = null;
   for (const node of transcriptContainer.querySelectorAll(".sentence")) {
-    const s = parseFloat(node.dataset.start),
-      e = parseFloat(node.dataset.end);
-    if (t >= s && t <= e) {
-      active = node;
-      break;
-    }
+    const s = parseFloat(node.dataset.start), e = parseFloat(node.dataset.end);
+    if (t >= s && t <= e) { active = node; break; }
   }
-  transcriptContainer
-    .querySelectorAll(".sentence")
-    .forEach((n) => n.classList.remove("active"));
+  transcriptContainer.querySelectorAll(".sentence").forEach((n) => n.classList.remove("active"));
   if (active) {
     active.classList.add("active");
-    // scroll into view
     active.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 });
 
-// basic file loaders (audio + transcript text - naive)
+// ── File loaders ──────────────────────────────────────────────────────────────
+
 transcriptInput.addEventListener("change", async (ev) => {
   const f = ev.target.files[0];
   if (!f) return;
   const text = await f.text();
-  // try WebVTT cues -> sentences, else split lines
-  if (text.includes("WEBVTT")) {
-    sentences = parseVTT(text);
-  } else {
-    const lines = text
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    let start = 0;
-    sentences = lines.map((ln, i) => ({
-      start: start + i * 3,
-      end: start + i * 3 + 3,
-      text: ln,
-    }));
-  }
+  sentences = text.includes("WEBVTT") ? parseVTT(text) : plainTextToSentences(text);
   renderTranscript();
   playerSection.classList.remove("hidden");
 });
@@ -414,8 +531,7 @@ transcriptInput.addEventListener("change", async (ev) => {
 audioInput.addEventListener("change", (ev) => {
   const f = ev.target.files[0];
   if (!f) return;
-  const url = URL.createObjectURL(f);
-  audio.src = url;
+  audio.src = URL.createObjectURL(f);
   playerSection.classList.remove("hidden");
 });
 
@@ -428,20 +544,16 @@ function parseVTT(text) {
     if (line && line.includes("-->")) {
       const parts = line.split("-->");
       const start = vttTimeToSec(parts[0].trim());
-      const end = vttTimeToSec(parts[1].trim());
-      i += 1;
-      let txt = "";
-      while (i < lines.length && lines[i].trim()) {
-        txt += lines[i] + "\n";
-        i++;
-      }
-      cues.push({ start, end, text: txt.trim() });
-    } else {
+      const end = vttTimeToSec(parts[1].trim().split(/\s/)[0]);
       i++;
-    }
+      let txt = "";
+      while (i < lines.length && lines[i].trim()) { txt += lines[i] + "\n"; i++; }
+      cues.push({ start, end, text: txt.trim() });
+    } else { i++; }
   }
   return cues;
 }
+
 function vttTimeToSec(s) {
   const m = s.split(":").map(parseFloat);
   if (m.length === 3) return m[0] * 3600 + m[1] * 60 + m[2];
@@ -449,88 +561,112 @@ function vttTimeToSec(s) {
   return parseFloat(s);
 }
 
-// accessibility: allow keyboard toggle of word known/unknown
+function plainTextToSentences(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return lines.map((ln, i) => ({ start: i * 3, end: i * 3 + 3, text: ln }));
+}
+
 transcriptContainer.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && ev.target.classList.contains("word")) {
-    ev.target.click();
-  }
+  if (ev.key === "Enter" && ev.target.classList.contains("word")) ev.target.click();
 });
 
-// expose small debug helper
-// attempt to load vocab_index.json and flagged_entries.json if present
+// ── Remote data loading ───────────────────────────────────────────────────────
+
 async function loadRemoteIndex() {
+  // vocab_index.json: surface form → {lemma, zh, en, rank, pos}
   try {
     const resp = await fetch("vocab_index.json");
     if (resp.ok) {
       const raw = await resp.json();
       vocabIndex = raw || {};
-      Object.values(vocabIndex).forEach((v) => {
-        v.rank = v.rank || 1000000;
-      });
-      // build surface->key mapping for quick lookup (surface forms and lemma)
+      Object.values(vocabIndex).forEach((v) => { v.rank = v.rank || 1000000; });
       vocabSurfaceToKey = {};
       Object.entries(vocabIndex).forEach(([k, v]) => {
         try {
           vocabSurfaceToKey[String(k).toLowerCase()] = k;
-          if (v && v.lemma)
-            vocabSurfaceToKey[String(v.lemma).toLowerCase()] = k;
+          if (v && v.lemma) vocabSurfaceToKey[String(v.lemma).toLowerCase()] = k;
         } catch (e) {}
       });
       renderVocabList();
-      vocabStats.textContent = `${Object.keys(vocabIndex).length} vocab loaded (index)`;
+      vocabStats.textContent = `${Object.keys(vocabIndex).length} 词索引已加载`;
     }
   } catch (e) {
     console.warn("vocab_index.json not available", e);
   }
-  // try to load server-provided user_mastery.json and merge with localStorage
+
+  // vocab_detail.json: lemma → rich hover data
+  try {
+    const resp = await fetch("vocab_detail.json");
+    if (resp.ok) {
+      vocabDetail = (await resp.json()) || {};
+    }
+  } catch (e) {
+    console.warn("vocab_detail.json not available", e);
+  }
+
+  // user_mastery.json: lemma → {level, interval, reps}  or legacy bool
   try {
     const r2 = await fetch("user_mastery.json");
     if (r2.ok) {
       const remote = await r2.json();
-      // merge remote into userMastery (remote wins)
       Object.entries(remote).forEach(([k, v]) => {
-        try {
-          userMastery[k.toLowerCase()] = !!v;
-        } catch (e) {}
+        try { userMastery[k.toLowerCase()] = v; } catch (e) {}
       });
       savePersistence();
-      // re-render UI reflecting new mastery
       renderVocabList();
-      // update transcript spans classes
       document.querySelectorAll(".word").forEach((el) => {
-        try {
-          const s = (el.dataset.surface || el.textContent || "").toLowerCase();
-          const key = vocabSurfaceToKey[s] || s;
-          el.classList.toggle("known", !!userMastery[key]);
-          el.classList.toggle("unknown", userMastery[key] === false);
-        } catch (e) {}
+        const s = (el.dataset.surface || "").toLowerCase();
+        const key = vocabSurfaceToKey[s] || s;
+        applyMasteryClass(el, key, vocabIndex[key] || null);
       });
     }
-  } catch (e) {
-    // silent
-  }
+  } catch (e) {}
+
+  // flagged_entries.json
   try {
     const r = await fetch("flagged_entries.json");
-    if (r.ok) {
-      flaggedEntries = await r.json();
-      console.log("flagged entries", flaggedEntries.length);
-    }
-  } catch (e) {
-    console.warn("flagged_entries.json not available", e);
-  }
+    if (r.ok) { flaggedEntries = await r.json(); }
+  } catch (e) {}
 }
 
 loadRemoteIndex();
 
-// flagged entries UI
+// ── Sample data ───────────────────────────────────────────────────────────────
+
+function loadSampleData() {
+  sentences = [
+    { start: 0.0, end: 4.0, text: "Hej, mit navn er Anna." },
+    { start: 4.1, end: 9.0, text: "Jeg bor i København og jeg lærer dansk hver dag." },
+  ];
+  // tiny inline sample so hover works without the full index
+  if (Object.keys(vocabIndex).length === 0) {
+    vocabIndex = {
+      hej: { lemma: "hej", zh: "嗨/你好", en: "hi", rank: 100 },
+      navn: { lemma: "navn", zh: "名字", en: "name", rank: 500 },
+      jeg: { lemma: "jeg", zh: "我", en: "I", rank: 1 },
+      bor: { lemma: "bo", zh: "居住", en: "live", rank: 1200 },
+      københavn: { lemma: "København", zh: "哥本哈根", en: "Copenhagen", rank: 2000 },
+      lærer: { lemma: "lære", zh: "学习/教", en: "learn/teach", rank: 800 },
+    };
+    vocabSurfaceToKey = Object.fromEntries(Object.keys(vocabIndex).map((k) => [k, k]));
+  }
+  userMastery = {};
+  audio.src = "";
+  playerSection.classList.remove("hidden");
+  renderTranscript();
+  renderVocabList();
+}
+
+// ── Flagged entries panel ─────────────────────────────────────────────────────
+
 const showFlaggedBtn = document.getElementById("showFlagged");
 const flaggedPanelEl = document.getElementById("flaggedPanel");
+
 function renderFlaggedPanel() {
   if (!flaggedPanelEl) return;
   flaggedPanelEl.innerHTML = "";
   const items = (flaggedEntries || []).filter((e) => {
-    const key = `${e.source_file}:${e.source_line}`;
-    return !flaggedReviewedSet.has(key);
+    return !flaggedReviewedSet.has(`${e.source_file}:${e.source_line}`);
   });
   if (items.length === 0) {
     flaggedPanelEl.innerHTML = "<div>没有未处理的待复核条目。</div>";
@@ -539,9 +675,7 @@ function renderFlaggedPanel() {
   const exportBtn = document.createElement("button");
   exportBtn.textContent = "Export flagged as JSON";
   exportBtn.addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify(items, null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -551,23 +685,16 @@ function renderFlaggedPanel() {
   flaggedPanelEl.appendChild(exportBtn);
   items.slice(0, 200).forEach((e) => {
     const div = document.createElement("div");
-    div.style.borderBottom = "1px solid #eee";
-    div.style.padding = "6px";
-    const title = document.createElement("div");
-    title.innerHTML = `<b>${e.lemma || "UNKNOWN"}</b> — rank:${e.rank} — ${e.source_file}:${e.source_line}`;
-    const notes = document.createElement("div");
-    notes.style.color = "#5f6b7a";
-    notes.textContent = `notes: ${Array.isArray(e.notes) ? e.notes.join(", ") : ""}`;
+    div.style.cssText = "border-bottom:1px solid #eee;padding:6px";
+    div.innerHTML = `<div><b>${escHtml(e.lemma || "?")}</b> — rank:${e.rank} — ${escHtml(e.source_file)}:${e.source_line}</div>
+      <div style="color:#5f6b7a">notes: ${Array.isArray(e.notes) ? e.notes.map(escHtml).join(", ") : ""}</div>`;
     const btn = document.createElement("button");
     btn.textContent = "Mark reviewed";
     btn.addEventListener("click", () => {
-      const key = `${e.source_file}:${e.source_line}`;
-      flaggedReviewedSet.add(key);
+      flaggedReviewedSet.add(`${e.source_file}:${e.source_line}`);
       savePersistence();
       renderFlaggedPanel();
     });
-    div.appendChild(title);
-    div.appendChild(notes);
     div.appendChild(btn);
     flaggedPanelEl.appendChild(div);
   });
@@ -584,11 +711,10 @@ if (showFlaggedBtn) {
   });
 }
 
-window._vocabIndex = vocabIndex;
-window._userMastery = userMastery;
+// ── Episodes ──────────────────────────────────────────────────────────────────
 
-// episodes loader
 let episodes = [];
+
 async function loadEpisodes() {
   try {
     const resp = await fetch("data/episodes.json");
@@ -603,7 +729,6 @@ async function loadEpisodes() {
         episodeSelect.appendChild(opt);
       });
     }
-    // auto-select episode 108 if present
     const ep108 = episodes.find((e) => String(e.id) === "108");
     if (ep108) {
       if (episodeSelect) episodeSelect.value = ep108.id;
@@ -618,38 +743,24 @@ async function loadEpisode(ep) {
   try {
     const audioPath = ep.audio ? "data/" + encodeURIComponent(ep.audio) : "";
     const transcriptPath = "data/" + encodeURIComponent(ep.transcript);
-    // set audio src (if present)
     if (audioPath) audio.src = audioPath;
     else audio.removeAttribute("src");
-    // fetch transcript
     let txt = "";
     try {
       const r = await fetch(transcriptPath);
       if (r.ok) txt = await r.text();
-    } catch (e) {
-      console.warn("transcript fetch failed", e);
-    }
+    } catch (e) {}
     if (txt) {
       if (txt.includes("WEBVTT")) {
         sentences = parseVTT(txt);
       } else {
-        const lines = txt
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        // try to use audio duration; wait for metadata if audio present
+        const lines = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
         let dur = lines.length * 3;
         if (audioPath) {
           await new Promise((resolve) => {
-            if (
-              audio.readyState >= 1 &&
-              audio.duration &&
-              !isNaN(audio.duration)
-            )
+            if (audio.readyState >= 1 && audio.duration && !isNaN(audio.duration))
               return resolve();
-            const onMeta = () => resolve();
-            audio.addEventListener("loadedmetadata", onMeta, { once: true });
-            // fallback timeout
+            audio.addEventListener("loadedmetadata", resolve, { once: true });
             setTimeout(resolve, 1500);
           });
           if (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
@@ -677,61 +788,60 @@ if (loadEpisodeBtn) {
     if (ep) loadEpisode(ep);
   });
 }
+
 loadEpisodes();
 
-// --- Reading tab: render pasted text with vocab hover and simple controls ---
+// ── Reading tab ───────────────────────────────────────────────────────────────
+
 let readingRenderDebounce = null;
+
 function renderReadingFromText(text) {
-  const container = readingPreview;
-  if (!container) return;
-  container.innerHTML = "";
+  if (!readingPreview) return;
+  readingPreview.innerHTML = "";
   if (!text || !text.trim()) return;
-  const paragraphs = String(text)
-    .split(/\n\s*\n/)
-    .filter(Boolean);
-  paragraphs.forEach((p) => {
+  String(text).split(/\n\s*\n/).filter(Boolean).forEach((p) => {
     const para = document.createElement("div");
     para.className = "sentence";
     const textSpan = document.createElement("span");
     textSpan.className = "text";
-    const parts = p.replace(/\r?\n/g, " ").split(/(\s+)/);
-    parts.forEach((t) => {
+    p.replace(/\r?\n/g, " ").split(/(\s+)/).forEach((t) => {
       if (/\s+/.test(t)) textSpan.appendChild(document.createTextNode(t));
       else {
-        const norm = t.replace(/[.,!?;:()"“”]/g, "").toLowerCase();
+        const norm = t.replace(/[.,!?;:()"""'«»–—]/g, "").toLowerCase();
         textSpan.appendChild(makeWordSpan(norm));
       }
     });
     para.appendChild(textSpan);
-    container.appendChild(para);
+    readingPreview.appendChild(para);
   });
 }
 
 if (readingInput) {
   readingInput.addEventListener("input", (e) => {
     if (readingRenderDebounce) clearTimeout(readingRenderDebounce);
-    readingRenderDebounce = setTimeout(
-      () => renderReadingFromText(e.target.value),
-      250,
-    );
+    readingRenderDebounce = setTimeout(() => renderReadingFromText(e.target.value), 250);
   });
 }
+
 if (clearArticleBtn) {
   clearArticleBtn.addEventListener("click", () => {
     if (readingInput) readingInput.value = "";
     if (readingPreview) readingPreview.innerHTML = "";
   });
 }
+
 if (saveArticleBtn) {
   saveArticleBtn.addEventListener("click", () => {
     const text = (readingInput && readingInput.value) || "";
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `article-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+    a.download = `article-${Date.now()}.txt`;
     a.click();
   });
 }
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
 
 function showTab(name) {
   const player = document.getElementById("player");
@@ -751,8 +861,13 @@ function showTab(name) {
     if (reading) reading.classList.add("hidden");
   }
 }
+
 if (tabPodcast) tabPodcast.addEventListener("click", () => showTab("podcast"));
 if (tabReading) tabReading.addEventListener("click", () => showTab("reading"));
 
-// ensure initial tab
 showTab("podcast");
+
+// ── Debug ─────────────────────────────────────────────────────────────────────
+window._vocabIndex = vocabIndex;
+window._userMastery = userMastery;
+window._vocabDetail = vocabDetail;
