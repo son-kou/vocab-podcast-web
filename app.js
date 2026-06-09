@@ -36,9 +36,53 @@ let userMastery = {};       // lemma -> {level:1-5, interval:N, reps:N}  OR  tru
 let flaggedEntries = [];
 let selectedSet = new Set();
 let flaggedReviewedSet = new Set();
+let contentWordKeys = new Set(); // surface keys that appear in the current transcript/article
 
 let currentHoveredSurface = null;
 const wiktionaryCache = new Map();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+// Default password: "vocab2024" — replace AUTH_HASH with SHA-256 of your password.
+// In browser console: crypto.subtle.digest('SHA-256', new TextEncoder().encode('yourpw'))
+//   .then(b => console.log(Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('')))
+const AUTH_HASH = "e48971b4ee5ef14bbe1bb3189045cc1e9853cc7fb3d9075dd75b3509dc1a3f6b";
+const STORAGE_KEY_AUTH = "vocab_auth_v1";
+
+function isLoggedIn() {
+  return sessionStorage.getItem(STORAGE_KEY_AUTH) === "ok";
+}
+
+async function verifyPassword(pw) {
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(pw));
+  const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return hex === AUTH_HASH;
+}
+
+function updateAuthUI() {
+  const loggedIn = isLoggedIn();
+  document.querySelectorAll(".auth-required").forEach(el => {
+    el.style.display = loggedIn ? "" : "none";
+  });
+  const loginBtn = document.getElementById("loginBtn");
+  if (loginBtn) loginBtn.textContent = loggedIn ? "Logout" : "Login";
+}
+
+async function handleLoginBtn() {
+  if (isLoggedIn()) {
+    sessionStorage.removeItem(STORAGE_KEY_AUTH);
+    updateAuthUI();
+    return;
+  }
+  const pw = prompt("Password:");
+  if (!pw) return;
+  if (await verifyPassword(pw)) {
+    sessionStorage.setItem(STORAGE_KEY_AUTH, "ok");
+    updateAuthUI();
+  } else {
+    alert("Wrong password.");
+  }
+}
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
@@ -79,9 +123,13 @@ loadPersistence();
  * 1-5 = Anki levels (see sync_with_anki.py)
  */
 function getMasteryLevel(key) {
-  const m = userMastery[key];
+  // Try direct key (surface form), then fall back to lemma
+  let m = userMastery[key];
+  if ((m === undefined || m === null) && vocabIndex[key]?.lemma) {
+    m = userMastery[vocabIndex[key].lemma.toLowerCase()];
+  }
   if (m === undefined || m === null) return 0;
-  if (typeof m === "boolean") return m ? 4 : 0;    // legacy format
+  if (typeof m === "boolean") return m ? 4 : 0;
   if (typeof m === "object") return m.level || 0;
   return 0;
 }
@@ -90,13 +138,15 @@ function getMasteryLabel(level) {
   return ["未学", "新词", "学习中", "复习中", "已掌握", "精通"][level] || "";
 }
 
-/** Toggle mastery: 0 → 4 (known) or 4+ → 0 (remove) */
+/** Toggle mastery: 0 → 4 (known) or 4+ → 0 (remove).
+ *  Stores under lemma key so it matches what Anki sync writes. */
 function toggleMastery(key) {
+  const lemmaKey = vocabIndex[key]?.lemma?.toLowerCase() || key;
   const cur = getMasteryLevel(key);
   if (cur >= 4) {
-    delete userMastery[key];
+    delete userMastery[lemmaKey];
   } else {
-    userMastery[key] = { level: 4, interval: 0, reps: 0 };
+    userMastery[lemmaKey] = { level: 4, interval: 0, reps: 0, manual: true };
   }
   savePersistence();
 }
@@ -118,17 +168,21 @@ function applyMasteryClass(el, key, info) {
   }
 }
 
-function makeWordSpan(word) {
+// displayText = original word (preserves case/punctuation for display)
+// lookupKey   = normalized lowercase form for vocab lookup (optional, defaults to displayText)
+function makeWordSpan(displayText, lookupKey) {
+  const norm = lookupKey || displayText;
   const span = document.createElement("span");
   span.className = "word";
-  span.textContent = word;
+  span.textContent = displayText;
   span.addEventListener("mouseenter", onWordHover);
   span.addEventListener("mouseleave", onWordLeave);
   span.addEventListener("click", onWordClick);
-  span.dataset.surface = word;
-  const key = vocabSurfaceToKey[word] || word;
+  span.dataset.surface = norm;
+  const key = vocabSurfaceToKey[norm] || norm;
   const info = vocabIndex[key] || null;
   applyMasteryClass(span, key, info);
+  if (info || vocabSurfaceToKey[norm]) contentWordKeys.add(key);
   return span;
 }
 
@@ -136,14 +190,25 @@ function makeWordSpan(word) {
 
 let hoverCard = null;
 
+let hoverHideTimer = null;
+
+function scheduleHide() {
+  clearTimeout(hoverHideTimer);
+  hoverHideTimer = setTimeout(() => {
+    if (hoverCard && !hoverCard.matches(":hover")) {
+      hoverCard.style.display = "none";
+      currentHoveredSurface = null;
+    }
+  }, 280);
+}
+
 function getHoverCard() {
   if (!hoverCard) {
     hoverCard = document.createElement("div");
     hoverCard.id = "hoverCard";
     hoverCard.className = "hoverCard";
-    // Allow click on links inside the card
-    hoverCard.addEventListener("mouseenter", () => { hoverCard.style.display = "block"; });
-    hoverCard.addEventListener("mouseleave", () => { hoverCard.style.display = "none"; });
+    hoverCard.addEventListener("mouseenter", () => clearTimeout(hoverHideTimer));
+    hoverCard.addEventListener("mouseleave", scheduleHide);
     document.body.appendChild(hoverCard);
   }
   return hoverCard;
@@ -171,9 +236,10 @@ function onWordHover(ev) {
   let left = rect.right + 8;
   if (left + cardW > window.innerWidth - 8) left = rect.left - cardW - 8;
   card.style.left = Math.max(4, left) + "px";
-  card.style.top = Math.min(rect.top, window.innerHeight - 200) + "px";
+  card.style.top = Math.max(4, Math.min(rect.top, window.innerHeight - 380)) + "px";
   card.style.display = "block";
   card.style.pointerEvents = "auto";
+  clearTimeout(hoverHideTimer);
   updateWiktSection(card, (info?.lemma || surface).toLowerCase(), surface);
 }
 
@@ -292,13 +358,8 @@ async function updateWiktSection(card, lemma, surface) {
   }
 }
 
-function onWordLeave(ev) {
-  // Delay hiding so user can move mouse into card to click links
-  setTimeout(() => {
-    if (hoverCard && !hoverCard.matches(":hover")) {
-      hoverCard.style.display = "none";
-    }
-  }, 120);
+function onWordLeave() {
+  scheduleHide();
 }
 
 function onWordClick(ev) {
@@ -320,6 +381,7 @@ function onWordClick(ev) {
 
 function renderTranscript() {
   transcriptContainer.innerHTML = "";
+  contentWordKeys.clear();
   sentences.forEach((s) => {
     const node = sentenceTemplate.content.firstElementChild.cloneNode(true);
     node.dataset.start = s.start;
@@ -330,7 +392,8 @@ function renderTranscript() {
       if (/\s+/.test(p)) textSpan.appendChild(document.createTextNode(p));
       else {
         const norm = p.replace(/[.,!?;:()"""'«»–—]/g, "").toLowerCase();
-        textSpan.appendChild(makeWordSpan(norm));
+        const display = p.replace(/[.,!?;:()"""'«»–—]/g, "");
+        textSpan.appendChild(makeWordSpan(display, norm));
       }
     });
     node.addEventListener("click", () => {
@@ -410,47 +473,86 @@ if (ttsAutoCheckbox)
 
 function renderVocabList() {
   vocabList.innerHTML = "";
-  const entries = Object.keys(vocabIndex).map((k) => {
+
+  // Determine source: words in current content, or all if no content loaded
+  const sourceKeys = contentWordKeys.size > 0
+    ? Array.from(contentWordKeys)
+    : Object.keys(vocabIndex);
+
+  const entries = sourceKeys.map((k) => {
     const v = vocabIndex[k] || {};
     return { key: k, lemma: (v.lemma || k).toString(), rank: v.rank || 1000000 };
   });
   entries.sort((a, b) => a.rank - b.rank);
+
+  // Deduplicate by lemma
   const seen = new Set();
   const unique = [];
   entries.forEach((e) => {
     const lk = e.lemma.toLowerCase();
     if (!seen.has(lk)) { seen.add(lk); unique.push(e); }
   });
-  unique.forEach((e) => {
+
+  // Split into unknown (level < 4) and known
+  const unknown = unique.filter((e) => getMasteryLevel(e.key) < 4);
+  const knownCount = unique.length - unknown.length;
+
+  if (unknown.length === 0 && contentWordKeys.size > 0) {
+    vocabList.innerHTML = "<div style='color:#888;font-size:13px'>当前内容的单词都已掌握！</div>";
+  }
+
+  unknown.forEach((e) => {
     const l = e.key;
-    const v = vocabIndex[l];
+    const v = vocabIndex[l] || {};
     const chip = document.createElement("div");
     chip.className = "vocabChip";
     const level = getMasteryLevel(l);
-    if (level >= 4) chip.classList.add("mastery-4");
-    if (level === 5) chip.classList.add("mastery-5");
+    if (level >= 1) chip.classList.add(`mastery-${level}`);
     if (selectedSet.has(l)) chip.classList.add("selected");
+
     const textSpan = document.createElement("span");
-    textSpan.textContent = `${v.lemma} — ${v.zh || ""}`;
+    textSpan.textContent = `${v.lemma || l} — ${v.zh || ""}`;
     textSpan.style.marginRight = "8px";
+
+    // Mark known button (auth-required)
+    const knownBtn = document.createElement("button");
+    knownBtn.textContent = "已掌握";
+    knownBtn.className = "auth-required";
+    knownBtn.style.fontSize = "11px";
+    knownBtn.style.padding = "3px 8px";
+    knownBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (!isLoggedIn()) { alert("请先登录"); return; }
+      toggleMastery(l);
+      renderVocabList();
+      document.querySelectorAll(".word").forEach((el) => {
+        const s = (el.dataset.surface || "").toLowerCase();
+        const k = vocabSurfaceToKey[s] || s;
+        if (k === l) applyMasteryClass(el, k, vocabIndex[k] || null);
+      });
+    });
+
     const selBtn = document.createElement("button");
     selBtn.textContent = selectedSet.has(l) ? "Selected" : "Select";
+    selBtn.style.fontSize = "11px";
+    selBtn.style.padding = "3px 8px";
     selBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       if (selectedSet.has(l)) selectedSet.delete(l);
       else selectedSet.add(l);
       renderVocabList();
     });
+
     chip.appendChild(textSpan);
+    chip.appendChild(knownBtn);
     chip.appendChild(selBtn);
-    chip.addEventListener("click", () => {
-      toggleMastery(l);
-      renderVocabList();
-    });
     vocabList.appendChild(chip);
   });
-  const knownCount = unique.filter((e) => getMasteryLevel(e.key) >= 4).length;
-  vocabStats.textContent = `${unique.length} 词  ·  已掌握 ${knownCount}`;
+
+  const total = unique.length;
+  const src = contentWordKeys.size > 0 ? "本文" : "全库";
+  vocabStats.textContent = `${src} ${total} 词  ·  生词 ${unknown.length}  ·  已掌握 ${knownCount}`;
+  updateAuthUI();
 }
 
 // ── Anki export ───────────────────────────────────────────────────────────────
@@ -799,6 +901,7 @@ function renderReadingFromText(text) {
   if (!readingPreview) return;
   readingPreview.innerHTML = "";
   if (!text || !text.trim()) return;
+  contentWordKeys.clear();
   String(text).split(/\n\s*\n/).filter(Boolean).forEach((p) => {
     const para = document.createElement("div");
     para.className = "sentence";
@@ -808,7 +911,8 @@ function renderReadingFromText(text) {
       if (/\s+/.test(t)) textSpan.appendChild(document.createTextNode(t));
       else {
         const norm = t.replace(/[.,!?;:()"""'«»–—]/g, "").toLowerCase();
-        textSpan.appendChild(makeWordSpan(norm));
+        const display = t.replace(/[.,!?;:()"""'«»–—]/g, "");
+        textSpan.appendChild(makeWordSpan(display, norm));
       }
     });
     para.appendChild(textSpan);
@@ -866,6 +970,11 @@ if (tabPodcast) tabPodcast.addEventListener("click", () => showTab("podcast"));
 if (tabReading) tabReading.addEventListener("click", () => showTab("reading"));
 
 showTab("podcast");
+
+// ── Login button ──────────────────────────────────────────────────────────────
+const loginBtn = document.getElementById("loginBtn");
+if (loginBtn) loginBtn.addEventListener("click", handleLoginBtn);
+updateAuthUI();
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
 window._vocabIndex = vocabIndex;

@@ -7,12 +7,12 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
-      <h1>Vocab Podcast Web</h1>
-      <p>
-        Upload audio + transcript, sync, and study with integrated vocab/Anki
-        export.
-      </p>
+    <header style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <h1 style="margin:0">丹麦语学习</h1>
+        <p style="margin:2px 0 0;color:#657078;font-size:13px">Podcast · Reading · Vocab</p>
+      </div>
+      <button id="loginBtn" style="font-size:12px;padding:5px 14px">Login</button>
     </header>
     <nav class="tabs" style="margin: 12px 0">
       <button id="tabPodcast" class="tab active">Podcast</button>
@@ -79,11 +79,11 @@
         <div
           style="margin-top: 8px; display: flex; gap: 8px; align-items: center"
         >
-          <button id="exportAnki">Export selected to Anki TSV</button>
-          <button id="exportSelectedFull">
+          <button id="exportAnki" class="auth-required">Export selected to Anki TSV</button>
+          <button id="exportSelectedFull" class="auth-required">
             Export selection for full Anki (lemmas)
           </button>
-          <button id="showFlagged">Review flagged entries</button>
+          <button id="showFlagged" class="auth-required">Review flagged entries</button>
         </div>
         <div
           id="flaggedPanel"
@@ -135,7 +135,7 @@
                 align-items: center;
               "
             >
-              <button id="saveArticle">Save article</button>
+              <button id="saveArticle" class="auth-required">Save article</button>
               <button id="clearArticle">Clear</button>
             </div>
             <div id="savedArticles" style="margin-top: 12px"></div>
