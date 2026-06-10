@@ -227,6 +227,14 @@ a:hover { text-decoration: underline; }
 .word.w-m3      { background: var(--m3-bg); color: var(--m3-fg); }
 .word.w-m4      { background: var(--m4-bg); color: var(--m4-fg); }
 
+/* OOV word classes */
+.word.w-oov {
+  background: rgba(245,158,11,.06);
+  text-decoration: underline dotted rgba(245,158,11,.6);
+  text-underline-offset: 2px;
+}
+.word.w-proper  { color: var(--muted); }
+
 /* ── Sentence / transcript ──────────────────────────────────── */
 .transcript-container {
   border: 1px solid var(--border);
@@ -605,7 +613,175 @@ a:hover { text-decoration: underline; }
 .vb-zh { color: var(--muted); font-size: 12px; }
 .vb-rank { font-size: 10px; color: #aaa; }
 
-/* ── Vocab panel chips ──────────────────────────────────────── */
+/* ── Vocab panel controls ───────────────────────────────────── */
+.vp-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.vp-sort-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.vp-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* ── Vocab panel rows (CSS grid) ────────────────────────────── */
+.vgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px 2px;
+  margin-top: 4px;
+}
+.vgroup-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.vgroup-count {
+  font-size: 10px;
+  color: #bbb;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 0 5px;
+  line-height: 1.6;
+}
+
+.vrow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 80ms;
+}
+.vrow:hover { background: #f8fafc; }
+.vrow.vrow-study { background: rgba(245,158,11,.08); }
+.vrow.vrow-oov   { background: rgba(245,158,11,.04); }
+.vrow.vrow-m1    { background: var(--m1-bg); }
+.vrow.vrow-m2    { background: var(--m2-bg); }
+.vrow.vrow-m3    { background: var(--m3-bg); }
+
+.vrow-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.vrow-lemma {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vrow-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.vrow-freq {
+  font-size: 10px;
+  color: #aaa;
+  flex-shrink: 0;
+}
+.vrow-btn {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background 80ms;
+}
+.vrow-btn:hover { background: #f1f5f9; }
+.vrow-btn.known { border-color: rgba(34,197,94,.5); background: var(--m4-bg); color: var(--m4-fg); }
+.vrow-gloss {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 1px;
+}
+
+/* Badge color variants */
+.badge-study  { background: var(--study-bg); color: var(--study-fg); }
+.badge-oov    { background: rgba(245,158,11,.2); color: #92400e; }
+.badge-proper { background: #f1f5f9; color: var(--muted); }
+.badge-l0     { background: rgba(99,102,241,.12); color: #3730a3; }
+.badge-l1     { background: var(--m1-bg); color: #7c4a00; }
+.badge-l2     { background: var(--m2-bg); color: #083a3f; }
+.badge-l3     { background: var(--m3-bg); color: #083a3f; }
+.badge-l4     { background: var(--m4-bg); color: var(--m4-fg); }
+
+/* OOV action buttons in hover card */
+.hc-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+.hc-oov-note { font-size: 12px; color: var(--muted); margin: 3px 0; }
+.hc-oov-count { font-size: 11px; color: var(--muted); }
+.hc-oov-actions { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.hc-oov-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.hc-oov-btn:hover { background: #f0fbfc; border-color: var(--accent); }
+.hc-pending { color: #aaa; font-style: italic; }
+
+/* OOV chip in 生词库 */
+.vbChip.vb-oov {
+  background: rgba(245,158,11,.08);
+  border-color: rgba(245,158,11,.3);
+}
+
+/* Anki snapshot note */
+.anki-snapshot-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+/* Article group heading */
+.article-group-head {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+
+/* ── Legacy vocab chip (kept for fallback) ──────────────────── */
 .vocabChip {
   display: flex;
   align-items: center;

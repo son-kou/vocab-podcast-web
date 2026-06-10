@@ -61,20 +61,26 @@
         <aside class="article-tree" id="articleTree">
           <div class="tree-header">
             <span>文章库</span>
-            <button id="newArticleBtn" class="btn-icon auth-required" title="新建文章">＋</button>
+            <button id="newArticleBtn" class="btn-icon" title="新建/粘贴文章">＋</button>
           </div>
           <input id="articleSearch" class="tree-search" placeholder="搜索…" />
           <div id="articleList"></div>
+          <div class="diary-io-row">
+            <button id="exportArticlesBtn" class="btn btn-sm">导出</button>
+            <button id="importArticlesBtn" class="btn btn-sm">导入</button>
+            <input id="importArticlesFile" type="file" accept=".json" class="hidden" />
+          </div>
         </aside>
         <div class="reading-main">
           <div id="readingPlaceholder" class="content-placeholder">
             <p>请选择或粘贴一篇文章</p>
+            <p class="muted-note">点击 ＋ 粘贴文本，立即渲染高亮。<br>文章保存在本地浏览器，不上传 GitHub。</p>
           </div>
           <div id="articleComposer" class="hidden composer">
             <input id="articleTitleInput" class="title-input" placeholder="文章标题（可选）" />
-            <textarea id="readingInput" class="body-textarea" placeholder="粘贴文章内容…" rows="18"></textarea>
+            <textarea id="readingInput" class="body-textarea" placeholder="粘贴丹麦语文章内容…" rows="18"></textarea>
             <div class="composer-actions">
-              <button id="saveArticle" class="btn auth-required">保存文章</button>
+              <button id="saveArticle" class="btn">保存文章</button>
               <button id="clearArticle" class="btn btn-ghost">清空</button>
               <button id="cancelCompose" class="btn btn-ghost">取消</button>
             </div>
@@ -137,11 +143,13 @@
 
     <!-- 生词库 ────────────────────────────────────────────────────────── -->
     <section id="vocabBrowserSection" class="hidden">
+      <div id="ankiSnapshotNote" class="anki-snapshot-note"></div>
       <div class="vb-toolbar">
         <input id="vocabSearch" class="vb-search" placeholder="搜索单词或含义…" />
         <select id="vbFilterLevel" class="vb-filter">
           <option value="">所有级别</option>
           <option value="study">★ 需要学习</option>
+          <option value="oov">8000以外 OOV</option>
           <option value="0">0 · 未见过</option>
           <option value="1">1 · 学习中</option>
           <option value="2">2 · 复习中</option>
@@ -163,6 +171,12 @@
           <option value="Adv">副词</option>
           <option value="P">代词</option>
           <option value="T">介词</option>
+        </select>
+        <select id="vbSortSelect" class="vb-filter">
+          <option value="priority">学习优先</option>
+          <option value="rank">频率排名</option>
+          <option value="freq">本文频次</option>
+          <option value="alpha">字母顺序</option>
         </select>
         <span id="vocabBrowserStats" class="vb-stats"></span>
       </div>
@@ -188,13 +202,31 @@
         <span class="word w-m2">习</span>
         <span class="word w-m3">熟</span>
         <span class="word w-m4">掌</span>
+        <span class="word w-oov">OOV</span>
+      </div>
+      <div class="vp-controls">
+        <select id="vpSortSelect" class="vp-sort-select">
+          <option value="priority">优先</option>
+          <option value="freq">频次</option>
+          <option value="rank">词频排名</option>
+          <option value="alpha">字母</option>
+        </select>
+        <label class="vp-toggle-label">
+          <input type="checkbox" id="vpShowOov" checked /> OOV
+        </label>
+        <label class="vp-toggle-label">
+          <input type="checkbox" id="vpShowMastered" /> 已掌握
+        </label>
       </div>
     </div>
     <div id="vocabList" class="vocab-list-chips"></div>
     <div class="vocab-panel-foot">
       <button id="exportWebActionsBtn" class="btn btn-sm auth-required">导出学习记录</button>
       <button id="exportAnkiBtn" class="btn btn-sm auth-required">导出 Anki TSV</button>
+      <button id="exportOovBtn" class="btn btn-sm">导出 OOV</button>
+      <button id="exportOovChatGPTBtn" class="btn btn-sm">OOV→ChatGPT</button>
       <button id="resetStateBtn" class="btn btn-sm btn-ghost">重置高亮</button>
+      <button id="clearOovBtn" class="btn btn-sm btn-ghost">清除OOV缓存</button>
     </div>
     <!-- legacy flagged entries panel -->
     <div id="flaggedPanelWrap" class="hidden">
