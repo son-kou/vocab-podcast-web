@@ -1,160 +1,214 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Vocab Podcast Web</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <header style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-      <div>
-        <h1 style="margin:0">丹麦语学习</h1>
-        <p style="margin:2px 0 0;color:#657078;font-size:13px">Podcast · Reading · Vocab</p>
-      </div>
-      <button id="loginBtn" style="font-size:12px;padding:5px 14px">Login</button>
-    </header>
-    <nav class="tabs" style="margin: 12px 0">
-      <button id="tabPodcast" class="tab active">Podcast</button>
-      <button id="tabReading" class="tab">Reading</button>
-      <button id="tabVocab" class="tab">生词库</button>
-    </nav>
-    <main>
-      <!-- uploader is hidden in UI; corpus is synced via the CLI. -->
-      <section id="uploader" class="hidden">
-        <div
-          style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"
-        >
-          <label
-            >Episode:
-            <select id="episodeSelect"></select
-          ></label>
-          <button id="loadEpisode">Load episode</button>
-          <label
-            >Audio file: <input type="file" id="audioInput" accept="audio/*"
-          /></label>
-          <label
-            >Transcript (WebVTT or plain text):
-            <input type="file" id="transcriptInput" accept="text/*"
-          /></label>
-          <button id="loadSample">Load sample</button>
-        </div>
-      </section>
+<html lang="da">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>丹麦语学习</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
 
-      <section id="player" class="hidden">
-        <audio id="audio" controls crossorigin="anonymous"></audio>
-        <div id="controls">
-          <label
-            >Speed:
-            <select id="speed">
-              <option>0.75</option>
-              <option selected>1</option>
-              <option>1.25</option>
-              <option>1.5</option>
-              <option>2</option>
-            </select></label
-          >
-          <div
-            id="ttsControls"
-            style="
-              display: inline-flex;
-              gap: 8px;
-              align-items: center;
-              margin-left: 12px;
-            "
-          >
-            <label
-              >Use TTS: <input type="checkbox" id="useTTS" checked
-            /></label>
-            <button id="ttsSpeak">Speak current sentence</button>
-            <label>Auto TTS: <input type="checkbox" id="ttsAuto" /></label>
+<header class="app-header">
+  <div class="header-brand">
+    <h1 class="app-title">丹麦语学习</h1>
+    <p class="app-subtitle">Podcast · Reading · Diary · 生词库</p>
+  </div>
+  <div class="header-stats" id="headerStats"></div>
+  <div class="header-actions">
+    <span class="sync-status" id="syncStatus"></span>
+    <button id="editModeBtn" class="btn btn-sm">Edit Mode</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button id="tabPodcast" class="tab active">Podcast</button>
+  <button id="tabReading" class="tab">Reading</button>
+  <button id="tabDiary"   class="tab">Diary</button>
+  <button id="tabVocab"   class="tab">生词库</button>
+</nav>
+
+<div class="app-body">
+
+  <!-- ── Left: tab content ─────────────────────────────────────────── -->
+  <div class="content-main" id="contentMain">
+
+    <!-- PODCAST ─────────────────────────────────────────────────────── -->
+    <section id="podcastSection">
+      <div class="episode-bar">
+        <select id="episodeSelect" class="episode-select"></select>
+        <button id="loadEpisodeBtn" class="btn btn-sm">加载</button>
+        <span class="separator"></span>
+        <label class="toggle-label"><input type="checkbox" id="useTTS" checked /> TTS</label>
+        <button id="ttsSpeak" class="btn btn-sm">读当前句</button>
+        <label class="toggle-label"><input type="checkbox" id="ttsAuto" /> 自动</label>
+        <label class="toggle-label">速度
+          <select id="speed">
+            <option value="0.75">×0.75</option>
+            <option value="1" selected>×1</option>
+            <option value="1.25">×1.25</option>
+            <option value="1.5">×1.5</option>
+            <option value="2">×2</option>
+          </select>
+        </label>
+      </div>
+      <audio id="audio" controls></audio>
+      <div id="transcriptContainer" class="transcript-container"></div>
+    </section>
+
+    <!-- READING ─────────────────────────────────────────────────────── -->
+    <section id="readingSection" class="hidden">
+      <div class="reading-layout">
+        <aside class="article-tree" id="articleTree">
+          <div class="tree-header">
+            <span>文章库</span>
+            <button id="newArticleBtn" class="btn-icon auth-required" title="新建文章">＋</button>
+          </div>
+          <input id="articleSearch" class="tree-search" placeholder="搜索…" />
+          <div id="articleList"></div>
+        </aside>
+        <div class="reading-main">
+          <div id="readingPlaceholder" class="content-placeholder">
+            <p>请选择或粘贴一篇文章</p>
+          </div>
+          <div id="articleComposer" class="hidden composer">
+            <input id="articleTitleInput" class="title-input" placeholder="文章标题（可选）" />
+            <textarea id="readingInput" class="body-textarea" placeholder="粘贴文章内容…" rows="18"></textarea>
+            <div class="composer-actions">
+              <button id="saveArticle" class="btn auth-required">保存文章</button>
+              <button id="clearArticle" class="btn btn-ghost">清空</button>
+              <button id="cancelCompose" class="btn btn-ghost">取消</button>
+            </div>
+          </div>
+          <div id="readingViewer" class="hidden">
+            <div class="article-header">
+              <h2 id="readingTitle" class="article-title"></h2>
+              <div id="articleStats" class="article-stats"></div>
+            </div>
+            <div id="readingPreview" class="article-body"></div>
           </div>
         </div>
-        <div id="transcriptContainer"></div>
-      </section>
+      </div>
+    </section>
 
-      <section id="vocabPanel">
-        <h2>Vocab</h2>
-        <div id="vocabStats">No vocab loaded.</div>
-        <div id="vocabList"></div>
-        <div
-          style="margin-top: 8px; display: flex; gap: 8px; align-items: center"
-        >
-          <button id="exportAnki" class="auth-required">Export selected to Anki TSV</button>
-          <button id="exportSelectedFull" class="auth-required">
-            Export selection for full Anki (lemmas)
-          </button>
-          <button id="showFlagged" class="auth-required">Review flagged entries</button>
-        </div>
-        <div
-          id="flaggedPanel"
-          class="hidden"
-          style="
-            margin-top: 10px;
-            border: 1px solid #eee;
-            padding: 8px;
-            border-radius: 6px;
-            max-height: 260px;
-            overflow: auto;
-          "
-        ></div>
-      </section>
-
-      <!-- Reading tab -->
-      <section id="readingSection" class="hidden">
-        <div class="reading-layout">
-          <!-- Left sidebar: article tree -->
-          <aside id="articleTree">
-            <div class="tree-header">
-              <span>文章</span>
-              <button id="newArticleBtn" class="auth-required tree-new-btn" title="新建文章">＋</button>
-            </div>
-            <div id="articleList"></div>
-          </aside>
-          <!-- Right: composer / viewer -->
-          <div class="reading-main">
-            <!-- Placeholder when nothing is open -->
-            <div id="readingPlaceholder" class="reading-placeholder">
-              <p>从左侧选择文章，或点击 ＋ 新建</p>
-            </div>
-            <!-- Composer: new article form -->
-            <div id="articleComposer" class="hidden">
-              <input id="articleTitleInput" class="article-title-input" placeholder="文章标题（可选）" />
-              <textarea
-                id="readingInput"
-                placeholder="粘贴文章内容…"
-                rows="16"
-              ></textarea>
-              <div class="composer-actions">
-                <button id="saveArticle" class="auth-required">保存文章</button>
-                <button id="clearArticle">清空</button>
-                <button id="cancelCompose">取消</button>
+    <!-- DIARY ───────────────────────────────────────────────────────── -->
+    <section id="diarySection" class="hidden">
+      <div class="diary-layout">
+        <aside class="diary-aside" id="diaryAside">
+          <div class="tree-header">
+            <span>日记</span>
+            <button id="newDiaryBtn" class="btn-icon" title="新建日记">＋</button>
+          </div>
+          <input id="diarySearch" class="tree-search" placeholder="搜索日记…" />
+          <div id="diaryEntryList"></div>
+          <div class="diary-io-row">
+            <button id="exportDiaryBtn" class="btn btn-sm">导出备份</button>
+            <button id="importDiaryBtn" class="btn btn-sm">导入备份</button>
+            <input id="importDiaryFile" type="file" accept=".json" class="hidden" />
+          </div>
+        </aside>
+        <div class="diary-main">
+          <div id="diaryPlaceholder" class="content-placeholder">
+            <p>选择日记条目，或点击 ＋ 新建</p>
+            <p class="muted-note">⚠ 日记保存在本地浏览器中，不上传到 GitHub。请定期导出备份。</p>
+          </div>
+          <div id="diaryEditor" class="hidden diary-editor">
+            <div class="diary-toolbar">
+              <input type="date" id="diaryDate" class="diary-date-input" />
+              <input id="diaryTitle" class="title-input" placeholder="标题（可选）" />
+              <div class="diary-toolbar-right">
+                <button id="saveDiaryBtn" class="btn">保存</button>
+                <button id="deleteDiaryBtn" class="btn btn-danger hidden">删除</button>
+                <button id="cancelDiaryBtn" class="btn btn-ghost">取消</button>
               </div>
             </div>
-            <!-- Viewer: renders saved article -->
-            <div id="readingViewer" class="hidden">
-              <h3 id="readingTitle" class="reading-article-title"></h3>
-              <div id="readingPreview"></div>
+            <div class="diary-body-wrap">
+              <textarea id="diaryBody" class="body-textarea diary-textarea"
+                placeholder="用丹麦语写今天的日记…"></textarea>
+              <div id="diaryPreview" class="diary-preview article-body"></div>
+            </div>
+            <div class="diary-footer">
+              <button id="copyPromptBtn" class="btn btn-sm">复制纠错提示</button>
+              <span id="diaryWordStats" class="muted-note"></span>
             </div>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Vocab browser tab: full unknown-word list with click-to-toggle -->
-      <section id="vocabBrowserSection" class="hidden">
-        <div class="vb-toolbar">
-          <input id="vocabSearch" class="vb-search" placeholder="搜索单词…" />
-          <span id="vocabBrowserStats" class="vb-stats"></span>
-        </div>
-        <div id="vocabBrowserList" class="vb-list"></div>
-      </section>
-    </main>
+    <!-- 生词库 ────────────────────────────────────────────────────────── -->
+    <section id="vocabBrowserSection" class="hidden">
+      <div class="vb-toolbar">
+        <input id="vocabSearch" class="vb-search" placeholder="搜索单词或含义…" />
+        <select id="vbFilterLevel" class="vb-filter">
+          <option value="">所有级别</option>
+          <option value="study">★ 需要学习</option>
+          <option value="0">0 · 未见过</option>
+          <option value="1">1 · 学习中</option>
+          <option value="2">2 · 复习中</option>
+          <option value="3">3 · 熟悉</option>
+          <option value="4">4 · 已掌握</option>
+        </select>
+        <select id="vbFilterRank" class="vb-filter">
+          <option value="">全部频率</option>
+          <option value="500">前 500</option>
+          <option value="1000">前 1000</option>
+          <option value="2000">前 2000</option>
+          <option value="5000">前 5000</option>
+        </select>
+        <select id="vbFilterPos" class="vb-filter">
+          <option value="">所有词性</option>
+          <option value="N">名词</option>
+          <option value="V">动词</option>
+          <option value="A">形容词</option>
+          <option value="Adv">副词</option>
+          <option value="P">代词</option>
+          <option value="T">介词</option>
+        </select>
+        <span id="vocabBrowserStats" class="vb-stats"></span>
+      </div>
+      <div id="vocabBrowserList" class="vb-list"></div>
+    </section>
 
-    <template id="sentenceTemplate"
-      ><div class="sentence" data-start="" data-end="">
-        <span class="text"></span></div
-    ></template>
+    <!-- Hidden uploader (kept for file-based load support) -->
+    <section id="uploader" class="hidden">
+      <label>Audio: <input type="file" id="audioInput" accept="audio/*" /></label>
+      <label>Transcript: <input type="file" id="transcriptInput" accept="text/*" /></label>
+      <button id="loadSample" class="btn btn-sm">Load sample</button>
+    </section>
 
-    <script src="app.js"></script>
-  </body>
+  </div><!-- /.content-main -->
+
+  <!-- ── Right: vocab panel (podcast / reading / diary) ──────────────── -->
+  <aside class="vocab-panel" id="vocabPanel">
+    <div class="vocab-panel-head">
+      <div id="vocabStats" class="vocab-stats-line">No vocab loaded.</div>
+      <div class="mastery-legend" id="masteryLegend">
+        <span class="word w-study">学</span>
+        <span class="word w-m1">新</span>
+        <span class="word w-m2">习</span>
+        <span class="word w-m3">熟</span>
+        <span class="word w-m4">掌</span>
+      </div>
+    </div>
+    <div id="vocabList" class="vocab-list-chips"></div>
+    <div class="vocab-panel-foot">
+      <button id="exportWebActionsBtn" class="btn btn-sm auth-required">导出学习记录</button>
+      <button id="exportAnkiBtn" class="btn btn-sm auth-required">导出 Anki TSV</button>
+      <button id="resetStateBtn" class="btn btn-sm btn-ghost">重置高亮</button>
+    </div>
+    <!-- legacy flagged entries panel -->
+    <div id="flaggedPanelWrap" class="hidden">
+      <button id="showFlagged" class="btn btn-sm auth-required">复核条目</button>
+      <div id="flaggedPanel" class="hidden flagged-panel"></div>
+    </div>
+  </aside>
+
+</div><!-- /.app-body -->
+
+<template id="sentenceTemplate">
+  <div class="sentence" data-start="" data-end=""><span class="text"></span></div>
+</template>
+
+<script src="app.js"></script>
+</body>
 </html>
