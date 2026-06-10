@@ -20,6 +20,7 @@ let ttsAutoPlaying = false;
 
 const tabPodcast = document.getElementById("tabPodcast");
 const tabReading = document.getElementById("tabReading");
+const tabVocabBtnBtn = document.getElementById("tabVocabBtn");
 const readingInput = document.getElementById("readingInput");
 const readingPreview = document.getElementById("readingPreview");
 const saveArticleBtn = document.getElementById("saveArticle");
@@ -41,6 +42,7 @@ let contentWordKeys = new Set(); // surface keys that appear in the current tran
 const STORAGE_KEY_ARTICLES = "vocab_articles_v1";
 let articles = [];           // [{id, title, text, savedAt}]
 let currentArticleId = null; // id of the currently viewed article
+let currentTab = "podcast";  // "podcast" | "reading" | "vocab"
 
 let currentHoveredSurface = null;
 const wiktionaryCache = new Map();
@@ -367,18 +369,27 @@ function onWordLeave() {
 }
 
 function onWordClick(ev) {
+  ev.stopPropagation(); // prevent sentence click handler from also firing
   const surface = (ev.target.dataset.surface || ev.target.textContent || "").toLowerCase();
   const key = vocabSurfaceToKey[surface] || surface;
   toggleMastery(key);
-  // Resolve the lemma so we can update ALL inflected forms (er/var/været → være)
+  // Update ALL spans sharing the same lemma (covers all inflected forms)
   const lemmaKey = vocabIndex[key]?.lemma?.toLowerCase() || key;
+  refreshAllSpansForLemma(lemmaKey);
+  renderVocabList();
+  renderVocabBrowser();
+}
+
+function refreshAllSpansForLemma(lemmaKey) {
   document.querySelectorAll(".word").forEach((el) => {
     const s = (el.dataset.surface || "").toLowerCase();
     const k = vocabSurfaceToKey[s] || s;
     const elLemma = vocabIndex[k]?.lemma?.toLowerCase() || k;
-    if (elLemma === lemmaKey) applyMasteryClass(el, k, vocabIndex[k] || null);
+    // Match by lemma OR by direct key equality
+    if (elLemma === lemmaKey || k === lemmaKey) {
+      applyMasteryClass(el, k, vocabIndex[k] || null);
+    }
   });
-  renderVocabList();
 }
 
 // ── Transcript rendering ──────────────────────────────────────────────────────
@@ -478,7 +489,13 @@ if (ttsAutoCheckbox)
 function renderVocabList() {
   vocabList.innerHTML = "";
 
-  // Determine source: words in current content, or all if no content loaded
+  // In reading mode without an open article, show empty state
+  if (currentTab === "reading" && contentWordKeys.size === 0) {
+    vocabStats.textContent = "打开文章后显示生词";
+    return;
+  }
+
+  // Determine source: words in current content, or all vocab in podcast mode
   const sourceKeys = contentWordKeys.size > 0
     ? Array.from(contentWordKeys)
     : Object.keys(vocabIndex);
@@ -528,12 +545,10 @@ function renderVocabList() {
       ev.stopPropagation();
       if (!isLoggedIn()) { alert("请先登录"); return; }
       toggleMastery(l);
+      const lm = vocabIndex[l]?.lemma?.toLowerCase() || l;
+      refreshAllSpansForLemma(lm);
       renderVocabList();
-      document.querySelectorAll(".word").forEach((el) => {
-        const s = (el.dataset.surface || "").toLowerCase();
-        const k = vocabSurfaceToKey[s] || s;
-        if (k === l) applyMasteryClass(el, k, vocabIndex[k] || null);
-      });
+      renderVocabBrowser();
     });
 
     const selBtn = document.createElement("button");
@@ -823,7 +838,7 @@ let episodes = [];
 
 async function loadEpisodes() {
   try {
-    const resp = await fetch("data/episodes.json");
+    const resp = await fetch("data/podcast/episodes.json");
     if (!resp.ok) return;
     episodes = await resp.json();
     if (episodeSelect) {
@@ -847,8 +862,8 @@ async function loadEpisodes() {
 
 async function loadEpisode(ep) {
   try {
-    const audioPath = ep.audio ? "data/" + encodeURIComponent(ep.audio) : "";
-    const transcriptPath = "data/" + encodeURIComponent(ep.transcript);
+    const audioPath = ep.audio ? "data/podcast/" + encodeURIComponent(ep.audio) : "";
+    const transcriptPath = "data/podcast/" + encodeURIComponent(ep.transcript);
     if (audioPath) audio.src = audioPath;
     else audio.removeAttribute("src");
     let txt = "";
@@ -996,7 +1011,7 @@ function renderArticleTree() {
     });
 
     item.appendChild(title);
-    item.appendChild(del);
+    if (!a.readonly) item.appendChild(del);
     list.appendChild(item);
   });
   updateAuthUI();
@@ -1052,18 +1067,118 @@ if (clearArticleBtn) {
   });
 }
 
+// ── Vocab browser (生词库 tab) ─────────────────────────────────────────────────
+
+let vocabBrowserFilter = "";
+
+function renderVocabBrowser() {
+  const list = document.getElementById("vocabBrowserList");
+  const stats = document.getElementById("vocabBrowserStats");
+  if (!list) return;
+
+  // Sort all vocab entries by rank
+  const allEntries = Object.entries(vocabIndex)
+    .map(([k, v]) => ({ key: k, lemma: (v.lemma || k).toLowerCase(), zh: v.zh || "", rank: v.rank || 1000000 }))
+    .sort((a, b) => a.rank - b.rank);
+
+  // Deduplicate by lemma
+  const seen = new Set();
+  const unique = [];
+  allEntries.forEach((e) => {
+    if (!seen.has(e.lemma)) { seen.add(e.lemma); unique.push(e); }
+  });
+
+  // Apply search filter
+  const q = vocabBrowserFilter.trim().toLowerCase();
+  const filtered = q
+    ? unique.filter(e => e.lemma.includes(q) || e.zh.includes(q))
+    : unique;
+
+  list.innerHTML = "";
+  let unknownCount = 0;
+
+  filtered.forEach((e) => {
+    const level = getMasteryLevel(e.key);
+    if (!q && level >= 4) { /* skip known unless searching */ return; }
+    unknownCount++;
+    const chip = document.createElement("div");
+    chip.className = "vbChip";
+    if (level >= 4) chip.classList.add(`mastery-${level}`);
+    chip.title = `${e.lemma} — ${e.zh}${level ? " (掌握级别 " + level + ")" : ""}`;
+
+    const lemmaSpan = document.createElement("span");
+    lemmaSpan.className = "vb-lemma";
+    lemmaSpan.textContent = e.lemma;
+
+    const zhSpan = document.createElement("span");
+    zhSpan.className = "vb-zh";
+    zhSpan.textContent = e.zh ? `— ${e.zh}` : "";
+
+    chip.appendChild(lemmaSpan);
+    if (e.zh) chip.appendChild(zhSpan);
+
+    chip.addEventListener("click", () => {
+      toggleMastery(e.key);
+      refreshAllSpansForLemma(e.lemma);
+      renderVocabBrowser();
+      renderVocabList();
+    });
+
+    list.appendChild(chip);
+  });
+
+  const totalUnknown = unique.filter(e => getMasteryLevel(e.key) < 4).length;
+  const totalKnown = unique.length - totalUnknown;
+  if (stats) {
+    stats.textContent = q
+      ? `搜索到 ${filtered.length} 词`
+      : `共 ${unique.length} 词 · 生词 ${totalUnknown} · 已掌握 ${totalKnown}`;
+  }
+}
+
+// Vocab search box
+const vocabSearchInput = document.getElementById("vocabSearch");
+if (vocabSearchInput) {
+  vocabSearchInput.addEventListener("input", (e) => {
+    vocabBrowserFilter = e.target.value;
+    renderVocabBrowser();
+  });
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
 function showTab(name) {
+  currentTab = name;
   const player = document.getElementById("player");
   const vocab = document.getElementById("vocabPanel");
   const reading = document.getElementById("readingSection");
-  if (name === "reading") {
-    tabReading && tabReading.classList.add("active");
-    tabPodcast && tabPodcast.classList.remove("active");
-    if (player) player.classList.add("hidden");
+  const browser = document.getElementById("vocabBrowserSection");
+
+  // Reset all tab buttons
+  [tabPodcast, tabReading, tabVocabBtn].forEach(t => t && t.classList.remove("active"));
+
+  // Hide all sections
+  if (player) player.classList.add("hidden");
+  if (reading) reading.classList.add("hidden");
+  if (browser) browser.classList.add("hidden");
+  if (vocab) vocab.classList.add("hidden");
+
+  if (name === "podcast") {
+    tabPodcast && tabPodcast.classList.add("active");
+    if (player) player.classList.remove("hidden");
     if (vocab) vocab.classList.remove("hidden");
+    // Re-populate contentWordKeys from current transcript spans
+    contentWordKeys.clear();
+    document.querySelectorAll("#transcriptContainer .word").forEach((el) => {
+      const s = (el.dataset.surface || "").toLowerCase();
+      const k = vocabSurfaceToKey[s] || s;
+      if (vocabIndex[k]) contentWordKeys.add(k);
+    });
+    renderVocabList();
+  } else if (name === "reading") {
+    tabReading && tabReading.classList.add("active");
     if (reading) reading.classList.remove("hidden");
+    if (vocab) vocab.classList.remove("hidden");
     // Re-populate contentWordKeys from current article
     if (currentArticleId) {
       const a = articles.find(x => x.id === currentArticleId);
@@ -1072,25 +1187,16 @@ function showTab(name) {
       contentWordKeys.clear();
     }
     renderVocabList();
-  } else {
-    tabPodcast && tabPodcast.classList.add("active");
-    tabReading && tabReading.classList.remove("active");
-    if (player) player.classList.remove("hidden");
-    if (vocab) vocab.classList.remove("hidden");
-    if (reading) reading.classList.add("hidden");
-    // Re-populate contentWordKeys from existing transcript spans (no re-render needed)
-    contentWordKeys.clear();
-    document.querySelectorAll("#transcriptContainer .word").forEach((el) => {
-      const s = (el.dataset.surface || "").toLowerCase();
-      const k = vocabSurfaceToKey[s] || s;
-      if (vocabIndex[k]) contentWordKeys.add(k);
-    });
-    renderVocabList();
+  } else if (name === "vocab") {
+    tabVocabBtn && tabVocabBtn.classList.add("active");
+    if (browser) browser.classList.remove("hidden");
+    renderVocabBrowser();
   }
 }
 
 if (tabPodcast) tabPodcast.addEventListener("click", () => showTab("podcast"));
 if (tabReading) tabReading.addEventListener("click", () => showTab("reading"));
+if (tabVocabBtn) tabVocabBtn.addEventListener("click", () => showTab("vocab"));
 
 showTab("podcast");
 
@@ -1101,6 +1207,34 @@ updateAuthUI();
 
 // ── Article init ──────────────────────────────────────────────────────────────
 loadArticlesFromStorage();
+
+// Merge file-based articles from data/reading/index.json (read-only)
+(async () => {
+  try {
+    const resp = await fetch("data/reading/index.json");
+    if (!resp.ok) return;
+    const index = await resp.json();
+    for (const entry of index) {
+      const alreadyLoaded = articles.some(a => a.filename === entry.filename);
+      if (alreadyLoaded) continue;
+      try {
+        const r = await fetch("data/reading/" + encodeURIComponent(entry.filename));
+        if (!r.ok) continue;
+        const text = await r.text();
+        articles.push({
+          id: "file:" + entry.filename,
+          title: entry.title,
+          text,
+          savedAt: 0,
+          readonly: true,
+          filename: entry.filename,
+        });
+      } catch (e) {}
+    }
+    renderArticleTree();
+  } catch (e) {}
+})();
+
 renderArticleTree();
 
 // ── Debug ─────────────────────────────────────────────────────────────────────

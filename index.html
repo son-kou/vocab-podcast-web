@@ -17,6 +17,7 @@
     <nav class="tabs" style="margin: 12px 0">
       <button id="tabPodcast" class="tab active">Podcast</button>
       <button id="tabReading" class="tab">Reading</button>
+      <button id="tabVocab" class="tab">生词库</button>
     </nav>
     <main>
       <!-- uploader is hidden in UI; corpus is synced via the CLI. -->
@@ -137,6 +138,15 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- Vocab browser tab: full unknown-word list with click-to-toggle -->
+      <section id="vocabBrowserSection" class="hidden">
+        <div class="vb-toolbar">
+          <input id="vocabSearch" class="vb-search" placeholder="搜索单词…" />
+          <span id="vocabBrowserStats" class="vb-stats"></span>
+        </div>
+        <div id="vocabBrowserList" class="vb-list"></div>
       </section>
     </main>
 
